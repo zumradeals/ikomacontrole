@@ -1,0 +1,105 @@
+import { Server, Wifi, WifiOff, Pause, HelpCircle } from 'lucide-react';
+import { useRunners } from '@/hooks/useRunners';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { formatDistanceToNow } from 'date-fns';
+import { fr } from 'date-fns/locale';
+
+const statusConfig = {
+  online: { icon: Wifi, label: 'En ligne', variant: 'default' as const, className: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  offline: { icon: WifiOff, label: 'Hors ligne', variant: 'secondary' as const, className: 'bg-red-500/20 text-red-400 border-red-500/30' },
+  paused: { icon: Pause, label: 'En pause', variant: 'outline' as const, className: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+  unknown: { icon: HelpCircle, label: 'Inconnu', variant: 'outline' as const, className: 'bg-muted text-muted-foreground' },
+};
+
+export function RunnersTable() {
+  const { data: runners, isLoading, error } = useRunners();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map(i => (
+          <Skeleton key={i} className="h-16 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12 text-red-400">
+        <p>Erreur lors du chargement des runners</p>
+        <p className="text-sm text-muted-foreground mt-2">{error.message}</p>
+      </div>
+    );
+  }
+
+  if (!runners || runners.length === 0) {
+    return (
+      <div className="text-center py-12 text-muted-foreground">
+        <Server className="w-12 h-12 mx-auto mb-4 opacity-50" />
+        <p>Aucun runner enregistré</p>
+        <p className="text-sm mt-2">
+          Installez un runner sur votre serveur pour commencer
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Nom</TableHead>
+          <TableHead>Statut</TableHead>
+          <TableHead>Dernière activité</TableHead>
+          <TableHead>Host</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {runners.map((runner) => {
+          const config = statusConfig[runner.status];
+          const StatusIcon = config.icon;
+          const hostInfo = runner.host_info as Record<string, string> | null;
+          
+          return (
+            <TableRow key={runner.id}>
+              <TableCell className="font-medium">
+                <div className="flex items-center gap-2">
+                  <Server className="w-4 h-4 text-primary" />
+                  {runner.name}
+                </div>
+              </TableCell>
+              <TableCell>
+                <Badge className={config.className}>
+                  <StatusIcon className="w-3 h-3 mr-1" />
+                  {config.label}
+                </Badge>
+              </TableCell>
+              <TableCell className="text-muted-foreground text-sm">
+                {runner.last_seen_at 
+                  ? formatDistanceToNow(new Date(runner.last_seen_at), { 
+                      addSuffix: true, 
+                      locale: fr 
+                    })
+                  : 'Jamais'
+                }
+              </TableCell>
+              <TableCell className="text-muted-foreground text-sm font-mono">
+                {hostInfo?.hostname || hostInfo?.ip || '—'}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}

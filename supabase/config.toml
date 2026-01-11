@@ -1,1 +1,4 @@
 project_id = "lqocccsxzqnbcwshseom"
+
+[functions.runner-api]
+verify_jwt = false
