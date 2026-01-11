@@ -131,7 +131,7 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
   const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
   const [selectedRunnerForReinstall, setSelectedRunnerForReinstall] = useState<Runner | null>(null);
   
-  const apiBaseUrl = getSetting('runner_api_base_url');
+  const apiBaseUrl = getSetting('runner_base_url');
 
   const TypeIcon = typeIcons[infrastructure.type] || HardDrive;
   const caps = (infrastructure.capabilities as Record<string, unknown>) || {};
