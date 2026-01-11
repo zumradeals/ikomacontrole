@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { HardDrive, Plus, Filter, RefreshCw } from 'lucide-react';
+import { HardDrive, Plus, RefreshCw, Info } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,6 +47,7 @@ const Infra = () => {
   const handleEdit = (infra: Infrastructure) => {
     setEditingInfra(infra);
     setIsFormOpen(true);
+    setViewingInfra(null);
   };
 
   const handleSubmit = async (data: InfrastructureInput) => {
@@ -60,25 +62,85 @@ const Infra = () => {
     if (deletingInfra) {
       deleteInfra.mutate(deletingInfra.id);
       setDeletingInfra(null);
+      setViewingInfra(null);
     }
   };
 
-  const getRunnerForInfra = (infraId: string) => {
-    const runner = runners?.find(r => r.infrastructure_id === infraId);
-    return runner?.name;
+  const getRunnerCountForInfra = (infraId: string) => {
+    return runners?.filter(r => r.infrastructure_id === infraId).length || 0;
   };
+
+  // If viewing details, show the details page
+  if (viewingInfra) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <PageHeader
+          title="Infrastructure"
+          description="Registre des capacités serveur"
+          icon={HardDrive}
+        />
+
+        <Alert className="glass-panel border-primary/20">
+          <Info className="w-4 h-4" />
+          <AlertDescription>
+            <strong>Module INFRA :</strong> Déclarez vos serveurs et leurs capacités. IKOMA ne crée rien — il observe et valide.
+          </AlertDescription>
+        </Alert>
+
+        <InfraDetails
+          infrastructure={viewingInfra}
+          runners={runners || []}
+          onBack={() => setViewingInfra(null)}
+          onEdit={() => handleEdit(viewingInfra)}
+          onDelete={() => setDeletingInfra(viewingInfra)}
+        />
+
+        {/* Delete Confirmation */}
+        <AlertDialog open={!!deletingInfra} onOpenChange={(open) => !open && setDeletingInfra(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Supprimer l'infrastructure ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Cette action est irréversible. L'infrastructure "{deletingInfra?.name}" sera supprimée.
+                {runners?.some(r => r.infrastructure_id === deletingInfra?.id) && (
+                  <span className="block mt-2 text-amber-500">
+                    ⚠️ Les runners associés seront automatiquement dissociés.
+                  </span>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annuler</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Supprimer
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Edit Form Dialog */}
+        <InfraForm
+          open={isFormOpen}
+          onOpenChange={setIsFormOpen}
+          infrastructure={editingInfra}
+          onSubmit={handleSubmit}
+          isLoading={createInfra.isPending || updateInfra.isPending}
+        />
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
       <div className="space-y-6 animate-fade-in">
         <PageHeader
           title="Infrastructure"
-          description="Registre et configuration de vos serveurs"
+          description="Registre des capacités serveur"
           icon={HardDrive}
         />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map(i => (
-            <Skeleton key={i} className="h-48 rounded-xl" />
+            <Skeleton key={i} className="h-52 rounded-xl" />
           ))}
         </div>
       </div>
@@ -89,7 +151,7 @@ const Infra = () => {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Infrastructure"
-        description="Registre et configuration de vos serveurs"
+        description="Registre des capacités serveur"
         icon={HardDrive}
         actions={
           <div className="flex items-center gap-2">
@@ -99,11 +161,30 @@ const Infra = () => {
             </Button>
             <Button size="sm" onClick={handleCreate}>
               <Plus className="w-4 h-4 mr-2" />
-              Déclarer Infra
+              Déclarer une infrastructure
             </Button>
           </div>
         }
       />
+
+      <Alert className="glass-panel border-primary/20">
+        <Info className="w-4 h-4" />
+        <AlertDescription>
+          <strong>Module INFRA :</strong> Déclarez vos serveurs et leurs capacités. IKOMA ne crée rien — il observe et valide.
+        </AlertDescription>
+      </Alert>
+
+      {/* Infrastructures Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Infrastructures déclarées
+        </h2>
+        {infrastructures && infrastructures.length > 0 && (
+          <span className="text-xs text-muted-foreground">
+            {infrastructures.length} infrastructure{infrastructures.length > 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
 
       {infrastructures && infrastructures.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -111,24 +192,22 @@ const Infra = () => {
             <InfraCard
               key={infra.id}
               infra={infra}
-              runnerName={getRunnerForInfra(infra.id)}
-              onEdit={() => handleEdit(infra)}
-              onDelete={() => setDeletingInfra(infra)}
-              onViewDetails={() => setViewingInfra(infra)}
+              runnerCount={getRunnerCountForInfra(infra.id)}
+              onClick={() => setViewingInfra(infra)}
             />
           ))}
         </div>
       ) : (
-        <div className="glass-panel rounded-xl p-5">
+        <div className="glass-panel rounded-xl p-8">
           <div className="text-center py-12 text-muted-foreground">
-            <HardDrive className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>Aucune infrastructure déclarée</p>
-            <p className="text-sm mt-2">
-              Déclarez vos serveurs pour les associer aux runners
+            <HardDrive className="w-16 h-16 mx-auto mb-4 opacity-30" />
+            <h3 className="text-lg font-medium mb-2">Aucune infrastructure déclarée</h3>
+            <p className="text-sm max-w-md mx-auto mb-6">
+              Déclarez vos serveurs (VPS, Bare Metal, Cloud) pour les associer aux runners et gérer leurs capacités.
             </p>
-            <Button className="mt-4" onClick={handleCreate}>
+            <Button onClick={handleCreate}>
               <Plus className="w-4 h-4 mr-2" />
-              Déclarer une Infrastructure
+              Déclarer une infrastructure
             </Button>
           </div>
         </div>
@@ -143,14 +222,6 @@ const Infra = () => {
         isLoading={createInfra.isPending || updateInfra.isPending}
       />
 
-      {/* Details Dialog */}
-      <InfraDetails
-        open={!!viewingInfra}
-        onOpenChange={(open) => !open && setViewingInfra(null)}
-        infrastructure={viewingInfra}
-        runners={runners || []}
-      />
-
       {/* Delete Confirmation */}
       <AlertDialog open={!!deletingInfra} onOpenChange={(open) => !open && setDeletingInfra(null)}>
         <AlertDialogContent>
@@ -160,7 +231,7 @@ const Infra = () => {
               Cette action est irréversible. L'infrastructure "{deletingInfra?.name}" sera supprimée.
               {runners?.some(r => r.infrastructure_id === deletingInfra?.id) && (
                 <span className="block mt-2 text-amber-500">
-                  ⚠️ Le runner associé sera automatiquement dissocié.
+                  ⚠️ Les runners associés seront automatiquement dissociés.
                 </span>
               )}
             </AlertDialogDescription>
