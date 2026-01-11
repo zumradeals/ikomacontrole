@@ -167,7 +167,12 @@ poll_orders() {
     return
   fi
   
-  # Extract orders array
+  # Extract orders array - check if jq is available
+  if ! command -v jq &> /dev/null; then
+    log "jq not installed, skipping order processing"
+    return
+  fi
+  
   ORDER_COUNT=\$(echo "\$ORDERS" | jq -r '.orders | length' 2>/dev/null || echo 0)
   
   if [ "\$ORDER_COUNT" -gt 0 ]; then
@@ -196,13 +201,20 @@ poll_orders() {
         # For detection orders, parse the result
         if [ "\$ORDER_CATEGORY" = "detection" ]; then
           RESULT=\$(echo "\$OUTPUT" | grep -A 100 '{"success":' | head -1)
-          curl -s -X POST "\$API_URL/orders/report" \\
-            -H "x-runner-token: \$TOKEN" \\
-            -H "Content-Type: application/json" \\
-            -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": \$RESULT}" > /dev/null
+          if [ -n "\$RESULT" ]; then
+            curl -s -X POST "\$API_URL/orders/report" \\
+              -H "x-runner-token: \$TOKEN" \\
+              -H "Content-Type: application/json" \\
+              -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": \$RESULT}" > /dev/null
+          else
+            curl -s -X POST "\$API_URL/orders/report" \\
+              -H "x-runner-token: \$TOKEN" \\
+              -H "Content-Type: application/json" \\
+              -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": {\"output\": \"Detection completed\"}}" > /dev/null
+          fi
         else
           # Escape output for JSON
-          ESCAPED_OUTPUT=\$(echo "\$OUTPUT" | jq -Rs .)
+          ESCAPED_OUTPUT=\$(echo "\$OUTPUT" | head -c 10000 | jq -Rs . 2>/dev/null || echo '\"output too large or invalid\"')
           curl -s -X POST "\$API_URL/orders/report" \\
             -H "x-runner-token: \$TOKEN" \\
             -H "Content-Type: application/json" \\
@@ -210,10 +222,10 @@ poll_orders() {
         fi
       else
         EXIT_CODE=\$?
-        ERROR_OUTPUT=\$(cat "\$TMPFILE")
+        ERROR_OUTPUT=\$(cat "\$TMPFILE" | head -c 5000)
         log "Order failed with exit code \$EXIT_CODE"
         
-        ESCAPED_ERROR=\$(echo "\$ERROR_OUTPUT" | jq -Rs .)
+        ESCAPED_ERROR=\$(echo "\$ERROR_OUTPUT" | jq -Rs . 2>/dev/null || echo '"Command failed"')
         curl -s -X POST "\$API_URL/orders/report" \\
           -H "x-runner-token: \$TOKEN" \\
           -H "Content-Type: application/json" \\
@@ -229,10 +241,10 @@ log "Starting Ikoma Runner"
 log "API URL: \$API_URL"
 log "Heartbeat interval: \${HEARTBEAT_INTERVAL}s, Poll interval: \${POLL_INTERVAL}s"
 
-# Check dependencies
+# Check and install jq if needed
 if ! command -v jq &> /dev/null; then
   log "Installing jq..."
-  apt-get update && apt-get install -y jq 2>/dev/null || yum install -y jq 2>/dev/null || apk add jq 2>/dev/null
+  apt-get update -qq && apt-get install -y -qq jq 2>/dev/null || yum install -y -q jq 2>/dev/null || apk add -q jq 2>/dev/null || log "Warning: Could not install jq"
 fi
 
 # Initial heartbeat
