@@ -32,7 +32,18 @@ export function ApiHealthCheck({ baseUrl }: ApiHealthCheckProps) {
     const startTime = Date.now();
     
     try {
-      const response = await fetch(`${baseUrl}/health`, {
+      // Build health URL - handle trailing slash and existing /health
+      let healthUrl = baseUrl.trim();
+      // Remove trailing slash if present
+      if (healthUrl.endsWith('/')) {
+        healthUrl = healthUrl.slice(0, -1);
+      }
+      // Don't add /health if already present
+      if (!healthUrl.endsWith('/health')) {
+        healthUrl = `${healthUrl}/health`;
+      }
+      
+      const response = await fetch(healthUrl, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
