@@ -65,6 +65,78 @@ export type Database = {
         }
         Relationships: []
       }
+      orders: {
+        Row: {
+          category: Database["public"]["Enums"]["order_category"]
+          command: string
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          error_message: string | null
+          id: string
+          infrastructure_id: string | null
+          name: string
+          progress: number | null
+          result: Json | null
+          runner_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["order_status"]
+          updated_at: string
+        }
+        Insert: {
+          category: Database["public"]["Enums"]["order_category"]
+          command: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          error_message?: string | null
+          id?: string
+          infrastructure_id?: string | null
+          name: string
+          progress?: number | null
+          result?: Json | null
+          runner_id: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["order_status"]
+          updated_at?: string
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["order_category"]
+          command?: string
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          error_message?: string | null
+          id?: string
+          infrastructure_id?: string | null
+          name?: string
+          progress?: number | null
+          result?: Json | null
+          runner_id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["order_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orders_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orders_runner_id_fkey"
+            columns: ["runner_id"]
+            isOneToOne: false
+            referencedRelation: "runners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       runners: {
         Row: {
           capabilities: Json | null
@@ -154,6 +226,13 @@ export type Database = {
     }
     Enums: {
       infra_type: "vps" | "bare_metal" | "cloud"
+      order_category:
+        | "installation"
+        | "update"
+        | "security"
+        | "maintenance"
+        | "detection"
+      order_status: "pending" | "running" | "completed" | "failed" | "cancelled"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -282,6 +361,14 @@ export const Constants = {
   public: {
     Enums: {
       infra_type: ["vps", "bare_metal", "cloud"],
+      order_category: [
+        "installation",
+        "update",
+        "security",
+        "maintenance",
+        "detection",
+      ],
+      order_status: ["pending", "running", "completed", "failed", "cancelled"],
     },
   },
 } as const

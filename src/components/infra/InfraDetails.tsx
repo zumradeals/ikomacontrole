@@ -12,7 +12,6 @@ import {
   Cloud,
   HardDrive,
   ExternalLink,
-  Unlink,
   RefreshCw,
   Terminal,
   GitBranch,
@@ -21,8 +20,7 @@ import {
   Globe,
   Network,
   Lock,
-  X,
-  Check
+  Scan
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +33,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Infrastructure, useAssociateRunner } from '@/hooks/useInfrastructures';
+import { SystemOrdersDialog } from './SystemOrdersDialog';
+import { AutoDetectDialog } from './AutoDetectDialog';
 import { formatDistanceToNow, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -117,6 +117,8 @@ function CapabilityCard({ icon, label, sublabel, available }: CapabilityCardProp
 export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete }: InfraDetailsProps) {
   const associateRunner = useAssociateRunner();
   const [selectedRunner, setSelectedRunner] = useState<string>('');
+  const [ordersDialogOpen, setOrdersDialogOpen] = useState(false);
+  const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
 
   const TypeIcon = typeIcons[infrastructure.type] || HardDrive;
   const caps = (infrastructure.capabilities as Record<string, unknown>) || {};
@@ -176,11 +178,21 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <RefreshCw className="w-4 h-4 mr-2" />
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setAutoDetectDialogOpen(true)}
+            disabled={associatedRunners.length === 0}
+          >
+            <Scan className="w-4 h-4 mr-2" />
             Auto-détection
           </Button>
-          <Button variant="outline" size="sm">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setOrdersDialogOpen(true)}
+            disabled={associatedRunners.length === 0}
+          >
             <Terminal className="w-4 h-4 mr-2" />
             Ordres système
           </Button>
@@ -431,6 +443,26 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
           )}
         </div>
       </div>
+
+      {/* System Orders Dialog */}
+      {associatedRunners.length > 0 && (
+        <SystemOrdersDialog
+          open={ordersDialogOpen}
+          onOpenChange={setOrdersDialogOpen}
+          runner={associatedRunners[0]}
+          infrastructureId={infrastructure.id}
+        />
+      )}
+
+      {/* Auto Detect Dialog */}
+      {associatedRunners.length > 0 && (
+        <AutoDetectDialog
+          open={autoDetectDialogOpen}
+          onOpenChange={setAutoDetectDialogOpen}
+          runner={associatedRunners[0]}
+          infrastructureId={infrastructure.id}
+        />
+      )}
     </div>
   );
 }
