@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useState, useEffect } from 'react';
+import { useAuth } from './useAuth';
 
 interface Setting {
   id: string;
@@ -12,6 +13,7 @@ interface Setting {
 
 export function useSettings() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const { data: settings, isLoading, error } = useQuery({
     queryKey: ['settings'],
@@ -23,6 +25,7 @@ export function useSettings() {
       if (error) throw error;
       return data as Setting[];
     },
+    enabled: !!user, // Only fetch if user is logged in
   });
 
   const getSetting = (key: string): string => {
