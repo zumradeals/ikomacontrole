@@ -1,11 +1,32 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ExternalLink, Unlink, Link2 } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { 
+  ArrowLeft, 
+  Pencil, 
+  Trash2, 
+  Cpu, 
+  MemoryStick, 
+  HardDrive as HardDriveIcon, 
+  MapPin,
+  Server,
+  Cloud,
+  HardDrive,
+  ExternalLink,
+  Unlink,
+  RefreshCw,
+  Terminal,
+  GitBranch,
+  Container,
+  Shield,
+  Globe,
+  Network,
+  Lock,
+  X,
+  Check
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import {
   Select,
   SelectContent,
@@ -13,11 +34,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Infrastructure, useAssociateRunner } from '@/hooks/useInfrastructures';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
 interface Runner {
@@ -25,185 +43,394 @@ interface Runner {
   name: string;
   status: string;
   infrastructure_id: string | null;
-  host_info: Record<string, unknown>;
+  last_seen_at: string | null;
+  host_info: Record<string, unknown> | null;
 }
 
 interface InfraDetailsProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  infrastructure: Infrastructure | null;
+  infrastructure: Infrastructure;
   runners: Runner[];
+  onBack: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }
+
+const typeIcons = {
+  vps: Server,
+  bare_metal: HardDrive,
+  cloud: Cloud,
+};
+
+const typeLabels = {
+  vps: 'VPS',
+  bare_metal: 'Bare Metal',
+  cloud: 'Cloud',
+};
 
 const statusColors: Record<string, string> = {
   online: 'bg-green-500',
-  offline: 'bg-gray-500',
+  offline: 'bg-muted-foreground/50',
   paused: 'bg-yellow-500',
-  unknown: 'bg-gray-400',
+  unknown: 'bg-muted-foreground/30',
 };
 
-export function InfraDetails({ open, onOpenChange, infrastructure, runners }: InfraDetailsProps) {
-  const associateRunner = useAssociateRunner();
+interface CapabilityCardProps {
+  icon: React.ReactNode;
+  label: string;
+  sublabel: string;
+  available: boolean | null;
+}
 
-  if (!infrastructure) return null;
-
-  const associatedRunner = runners.find(r => r.infrastructure_id === infrastructure.id);
-  const availableRunners = runners.filter(r => !r.infrastructure_id);
-
-  const handleAssociate = (runnerId: string) => {
-    associateRunner.mutate({ runnerId, infrastructureId: infrastructure.id });
+function CapabilityCard({ icon, label, sublabel, available }: CapabilityCardProps) {
+  const getBorderClass = () => {
+    if (available === true) return 'border-green-500/50 bg-green-500/5';
+    if (available === false) return 'border-red-500/30 bg-red-500/5';
+    return 'border-border/50 bg-muted/20';
   };
 
-  const handleDissociate = () => {
-    if (associatedRunner) {
-      associateRunner.mutate({ runnerId: associatedRunner.id, infrastructureId: null });
+  const getStatusText = () => {
+    if (available === true) return { text: '✓ Disponible', class: 'text-green-400' };
+    if (available === false) return { text: '✗ Non disponible', class: 'text-red-400' };
+    return { text: 'Non spécifié', class: 'text-muted-foreground' };
+  };
+
+  const status = getStatusText();
+
+  return (
+    <div className={`p-4 rounded-lg border ${getBorderClass()} transition-colors`}>
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className="text-primary">{icon}</div>
+          <div>
+            <p className="font-medium text-primary">{label}</p>
+            <p className="text-xs text-muted-foreground">{sublabel}</p>
+          </div>
+        </div>
+        <span className={`text-xs font-medium ${status.class}`}>
+          {status.text}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete }: InfraDetailsProps) {
+  const associateRunner = useAssociateRunner();
+  const [selectedRunner, setSelectedRunner] = useState<string>('');
+
+  const TypeIcon = typeIcons[infrastructure.type] || HardDrive;
+  const caps = (infrastructure.capabilities as Record<string, unknown>) || {};
+  
+  // Get associated runners for this infrastructure
+  const associatedRunners = runners.filter(r => r.infrastructure_id === infrastructure.id);
+  const availableRunners = runners.filter(r => !r.infrastructure_id);
+
+  const handleAssociate = () => {
+    if (selectedRunner) {
+      associateRunner.mutate({ runnerId: selectedRunner, infrastructureId: infrastructure.id });
+      setSelectedRunner('');
     }
   };
 
+  const handleDissociate = (runnerId: string) => {
+    associateRunner.mutate({ runnerId, infrastructureId: null });
+  };
+
+  // Parse capabilities
+  const getCapValue = (key: string): boolean | null => {
+    const val = caps[key];
+    if (val === true) return true;
+    if (val === false) return false;
+    return null;
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {infrastructure.name}
-            <Badge variant="outline">{infrastructure.type.toUpperCase()}</Badge>
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          {/* Specs */}
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            {infrastructure.os && (
-              <div>
-                <span className="text-muted-foreground">OS:</span>{' '}
-                <span className="font-medium">{infrastructure.os}</span>
-              </div>
-            )}
-            {infrastructure.distribution && (
-              <div>
-                <span className="text-muted-foreground">Distribution:</span>{' '}
-                <span className="font-medium">{infrastructure.distribution}</span>
-              </div>
-            )}
-            {infrastructure.architecture && (
-              <div>
-                <span className="text-muted-foreground">Architecture:</span>{' '}
-                <span className="font-medium">{infrastructure.architecture}</span>
-              </div>
-            )}
-            {infrastructure.cpu_cores && (
-              <div>
-                <span className="text-muted-foreground">CPU:</span>{' '}
-                <span className="font-medium">{infrastructure.cpu_cores} cores</span>
-              </div>
-            )}
-            {infrastructure.ram_gb && (
-              <div>
-                <span className="text-muted-foreground">RAM:</span>{' '}
-                <span className="font-medium">{infrastructure.ram_gb} GB</span>
-              </div>
-            )}
-            {infrastructure.disk_gb && (
-              <div>
-                <span className="text-muted-foreground">Disque:</span>{' '}
-                <span className="font-medium">{infrastructure.disk_gb} GB</span>
-              </div>
-            )}
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={onBack}>
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
+            <TypeIcon className="w-6 h-6 text-primary" />
           </div>
-
-          {infrastructure.notes && (
-            <>
-              <Separator />
-              <div>
-                <h4 className="text-sm font-medium mb-1">Notes</h4>
-                <p className="text-sm text-muted-foreground">{infrastructure.notes}</p>
-              </div>
-            </>
-          )}
-
-          <Separator />
-
-          {/* Runner Association */}
           <div>
-            <h4 className="text-sm font-medium mb-3">Runner Associé</h4>
-            
-            {associatedRunner ? (
-              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full ${statusColors[associatedRunner.status]}`} />
-                  <div>
-                    <p className="font-medium">{associatedRunner.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      Status: {associatedRunner.status}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button asChild variant="ghost" size="sm">
-                    <Link to="/runner">
-                      <ExternalLink className="w-4 h-4 mr-1" />
-                      Voir
-                    </Link>
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={handleDissociate}
-                    disabled={associateRunner.isPending}
-                  >
-                    <Unlink className="w-4 h-4 mr-1" />
-                    Dissocier
-                  </Button>
+            <h1 className="text-2xl font-bold">{infrastructure.name}</h1>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>{typeLabels[infrastructure.type]}</span>
+              {infrastructure.os && (
+                <>
+                  <span>•</span>
+                  <span>{infrastructure.os}</span>
+                </>
+              )}
+              {infrastructure.architecture && (
+                <>
+                  <span>•</span>
+                  <span>{infrastructure.architecture}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm">
+            <RefreshCw className="w-4 h-4 mr-2" />
+            Auto-détection
+          </Button>
+          <Button variant="outline" size="sm">
+            <Terminal className="w-4 h-4 mr-2" />
+            Ordres système
+          </Button>
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            <Pencil className="w-4 h-4 mr-2" />
+            Modifier
+          </Button>
+          <Button variant="outline" size="sm" onClick={onDelete} className="text-destructive hover:text-destructive">
+            <Trash2 className="w-4 h-4 mr-2" />
+            Supprimer
+          </Button>
+        </div>
+      </div>
+
+      {/* Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main Content */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Resources Section */}
+          <section className="glass-panel rounded-xl p-6">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+              Ressources
+            </h2>
+            <div className="grid grid-cols-4 gap-6">
+              <div className="flex items-center gap-3">
+                <Cpu className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground">CPU</p>
+                  <p className="font-medium">
+                    {infrastructure.cpu_cores ? `${infrastructure.cpu_cores} cores` : 'Non spécifié'}
+                  </p>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">Aucun runner associé</p>
-                
-                {availableRunners.length > 0 ? (
-                  <div className="flex gap-2">
-                    <Select onValueChange={handleAssociate}>
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Sélectionner un runner" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableRunners.map(runner => (
-                          <SelectItem key={runner.id} value={runner.id}>
-                            <div className="flex items-center gap-2">
-                              <div className={`w-2 h-2 rounded-full ${statusColors[runner.status]}`} />
-                              {runner.name} 
-                              <span className="text-muted-foreground">({runner.status})</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              <div className="flex items-center gap-3">
+                <MemoryStick className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground">RAM</p>
+                  <p className="font-medium">
+                    {infrastructure.ram_gb ? `${infrastructure.ram_gb} Go` : 'Non spécifié'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <HardDriveIcon className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Disque</p>
+                  <p className="font-medium">
+                    {infrastructure.disk_gb ? `${infrastructure.disk_gb} Go` : 'Non spécifié'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <MapPin className="w-5 h-5 text-muted-foreground" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Localisation</p>
+                  <p className="font-medium">
+                    {(caps.location as string) || 'Non spécifié'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Capabilities Section */}
+          <section className="glass-panel rounded-xl p-6">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+              Capacités
+            </h2>
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              <CapabilityCard
+                icon={<GitBranch className="w-5 h-5" />}
+                label="Git"
+                sublabel="Déclaré"
+                available={getCapValue('git')}
+              />
+              <CapabilityCard
+                icon={<Container className="w-5 h-5" />}
+                label="Docker"
+                sublabel="Déclaré"
+                available={getCapValue('docker')}
+              />
+              <CapabilityCard
+                icon={<Shield className="w-5 h-5" />}
+                label="Accès root"
+                sublabel="Déclaré"
+                available={getCapValue('root_access')}
+              />
+              <CapabilityCard
+                icon={<Container className="w-5 h-5" />}
+                label="Docker Compose"
+                sublabel="Déclaré"
+                available={getCapValue('docker_compose')}
+              />
+              <CapabilityCard
+                icon={<Lock className="w-5 h-5" />}
+                label="HTTPS possible"
+                sublabel="Déclaré"
+                available={getCapValue('https_possible')}
+              />
+              <CapabilityCard
+                icon={<Network className="w-5 h-5" />}
+                label="Ports exposables"
+                sublabel="Déclaré"
+                available={getCapValue('exposable_ports')}
+              />
+              <CapabilityCard
+                icon={<Globe className="w-5 h-5" />}
+                label="Accès Internet sortant"
+                sublabel="Déclaré"
+                available={getCapValue('internet_access')}
+              />
+            </div>
+          </section>
+
+          {/* Runners Section */}
+          <section className="glass-panel rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Runners associés
+              </h2>
+              
+              {availableRunners.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <Select value={selectedRunner} onValueChange={setSelectedRunner}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Associer un runner" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableRunners.map(runner => (
+                        <SelectItem key={runner.id} value={runner.id}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${statusColors[runner.status]}`} />
+                            {runner.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedRunner && (
                     <Button 
-                      size="icon"
-                      variant="outline"
+                      size="sm" 
+                      onClick={handleAssociate}
                       disabled={associateRunner.isPending}
                     >
-                      <Link2 className="w-4 h-4" />
+                      Associer
                     </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {associatedRunners.length > 0 ? (
+              <div className="space-y-3">
+                {associatedRunners.map(runner => (
+                  <div 
+                    key={runner.id}
+                    className="flex items-center justify-between p-4 rounded-lg bg-muted/30 border border-border/50"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2.5 h-2.5 rounded-full ${statusColors[runner.status]}`} />
+                      <div>
+                        <p className="font-medium">{runner.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {runner.status} • {runner.last_seen_at 
+                            ? format(new Date(runner.last_seen_at), "dd/MM/yyyy HH:mm:ss", { locale: fr })
+                            : 'Jamais vu'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button asChild variant="ghost" size="sm">
+                        <Link to="/runner">
+                          <ExternalLink className="w-4 h-4 mr-1" />
+                          Voir
+                        </Link>
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => handleDissociate(runner.id)}
+                        disabled={associateRunner.isPending}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        Dissocier
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-sm text-amber-500">
-                    Aucun runner disponible. Tous les runners sont déjà associés.
-                  </p>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">Aucun runner associé à cette infrastructure</p>
+                {availableRunners.length === 0 && (
+                  <p className="text-xs mt-1">Tous les runners sont déjà associés à d'autres infrastructures.</p>
                 )}
               </div>
             )}
-          </div>
-
-          <Separator />
-
-          {/* Metadata */}
-          <div className="text-xs text-muted-foreground">
-            <p>Créé {formatDistanceToNow(new Date(infrastructure.created_at), { addSuffix: true, locale: fr })}</p>
-            <p>Mis à jour {formatDistanceToNow(new Date(infrastructure.updated_at), { addSuffix: true, locale: fr })}</p>
-          </div>
+          </section>
         </div>
-      </DialogContent>
-    </Dialog>
+
+        {/* Sidebar */}
+        <div className="space-y-6">
+          {/* Info Card */}
+          <div className="glass-panel rounded-xl p-6">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+              Informations
+            </h3>
+            <div className="space-y-3 text-sm">
+              {infrastructure.distribution && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Distribution</span>
+                  <span className="font-medium">{infrastructure.distribution}</span>
+                </div>
+              )}
+              {caps.provider && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Fournisseur</span>
+                  <span className="font-medium">{caps.provider as string}</span>
+                </div>
+              )}
+              <Separator className="my-3" />
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Créé le</span>
+                <span className="font-medium">
+                  {format(new Date(infrastructure.created_at), "dd/MM/yyyy", { locale: fr })}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Modifié</span>
+                <span className="font-medium">
+                  {formatDistanceToNow(new Date(infrastructure.updated_at), { addSuffix: true, locale: fr })}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          {infrastructure.notes && (
+            <div className="glass-panel rounded-xl p-6">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+                Notes
+              </h3>
+              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                {infrastructure.notes}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
