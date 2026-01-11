@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Terminal, RefreshCw, Trash2, Download, Pause, Play } from 'lucide-react';
+import { Terminal, Trash2, Download, Pause, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -22,7 +22,7 @@ interface RunnerLogsProps {
 interface LogEntry {
   id: string;
   timestamp: Date;
-  type: 'heartbeat' | 'order_poll' | 'order_execute' | 'order_complete' | 'order_fail' | 'system';
+  type: 'heartbeat' | 'order_pending' | 'order_execute' | 'order_complete' | 'order_fail' | 'system';
   message: string;
   details?: Record<string, unknown>;
 }
@@ -31,9 +31,27 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isPaused, setIsPaused] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const lastSeenRef = useRef<string | null>(null);
+  const processedOrdersRef = useRef<Set<string>>(new Set());
+  const lastHeartbeatRef = useRef<string | null>(null);
+  const queryClient = useQueryClient();
 
-  // Fetch recent orders to generate log entries
+  // Fetch runner data with realtime updates
+  const { data: runnerData } = useQuery({
+    queryKey: ['runner-live', runner.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('runners')
+        .select('*')
+        .eq('id', runner.id)
+        .single();
+      
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: isPaused ? false : 2000,
+  });
+
+  // Fetch recent orders with refetch
   const { data: orders } = useQuery({
     queryKey: ['runner-logs-orders', runner.id],
     queryFn: async () => {
@@ -47,99 +65,169 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
       if (error) throw error;
       return data;
     },
-    refetchInterval: isPaused ? false : 3000,
+    refetchInterval: isPaused ? false : 2000,
   });
+
+  // Setup Realtime subscription for orders
+  useEffect(() => {
+    if (isPaused) return;
+
+    const channel = supabase
+      .channel(`runner-orders-${runner.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: `runner_id=eq.${runner.id}`,
+        },
+        () => {
+          // Refetch orders when any change occurs
+          queryClient.invalidateQueries({ queryKey: ['runner-logs-orders', runner.id] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [runner.id, isPaused, queryClient]);
+
+  // Setup Realtime subscription for runner heartbeat
+  useEffect(() => {
+    if (isPaused) return;
+
+    const channel = supabase
+      .channel(`runner-heartbeat-${runner.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'runners',
+          filter: `id=eq.${runner.id}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['runner-live', runner.id] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [runner.id, isPaused, queryClient]);
 
   // Generate logs from orders and heartbeats
   useEffect(() => {
-    if (!orders || isPaused) return;
+    if (isPaused) return;
 
     const newLogs: LogEntry[] = [];
+    const currentTime = new Date();
 
-    // Add heartbeat logs based on last_seen_at changes
-    if (runner.last_seen_at && runner.last_seen_at !== lastSeenRef.current) {
-      lastSeenRef.current = runner.last_seen_at;
+    // Add heartbeat log if last_seen_at changed
+    const lastSeen = runnerData?.last_seen_at;
+    if (lastSeen && lastSeen !== lastHeartbeatRef.current) {
+      lastHeartbeatRef.current = lastSeen;
       newLogs.push({
-        id: `heartbeat-${Date.now()}`,
-        timestamp: new Date(runner.last_seen_at),
+        id: `heartbeat-${lastSeen}`,
+        timestamp: new Date(lastSeen),
         type: 'heartbeat',
-        message: 'Heartbeat reçu',
+        message: 'Heartbeat reçu du runner',
       });
     }
 
     // Add order-related logs
-    orders.forEach(order => {
-      const orderTyped = order as {
-        id: string;
-        name: string;
-        status: string;
-        created_at: string;
-        started_at: string | null;
-        completed_at: string | null;
-        error_message: string | null;
-        result: unknown;
-      };
+    if (orders) {
+      orders.forEach(order => {
+        const orderTyped = order as {
+          id: string;
+          name: string;
+          status: string;
+          created_at: string;
+          started_at: string | null;
+          completed_at: string | null;
+          error_message: string | null;
+          result: unknown;
+          updated_at: string;
+        };
 
-      // Order created
-      newLogs.push({
-        id: `order-created-${orderTyped.id}`,
-        timestamp: new Date(orderTyped.created_at),
-        type: 'order_poll',
-        message: `Ordre reçu: ${orderTyped.name}`,
-        details: { order_id: orderTyped.id },
-      });
+        // Track which order states we've already logged
+        const createdKey = `created-${orderTyped.id}`;
+        const startedKey = `started-${orderTyped.id}`;
+        const completedKey = `completed-${orderTyped.id}`;
 
-      // Order started
-      if (orderTyped.started_at) {
-        newLogs.push({
-          id: `order-started-${orderTyped.id}`,
-          timestamp: new Date(orderTyped.started_at),
-          type: 'order_execute',
-          message: `Exécution: ${orderTyped.name}`,
-          details: { order_id: orderTyped.id },
-        });
-      }
+        // Order pending (created but not started)
+        if (orderTyped.status === 'pending') {
+          newLogs.push({
+            id: `order-pending-${orderTyped.id}`,
+            timestamp: new Date(orderTyped.created_at),
+            type: 'order_pending',
+            message: `📋 Ordre en attente: ${orderTyped.name}`,
+            details: { order_id: orderTyped.id, status: 'pending' },
+          });
+        }
 
-      // Order completed or failed
-      if (orderTyped.completed_at) {
-        if (orderTyped.status === 'completed') {
+        // Order running (started)
+        if (orderTyped.status === 'running' && orderTyped.started_at) {
+          newLogs.push({
+            id: `order-running-${orderTyped.id}`,
+            timestamp: new Date(orderTyped.started_at),
+            type: 'order_execute',
+            message: `⚡ Exécution en cours: ${orderTyped.name}`,
+            details: { order_id: orderTyped.id, status: 'running' },
+          });
+        }
+
+        // Order completed
+        if (orderTyped.status === 'completed' && orderTyped.completed_at) {
           newLogs.push({
             id: `order-completed-${orderTyped.id}`,
             timestamp: new Date(orderTyped.completed_at),
             type: 'order_complete',
-            message: `Terminé: ${orderTyped.name}`,
+            message: `✅ Terminé: ${orderTyped.name}`,
             details: { order_id: orderTyped.id, result: orderTyped.result },
           });
-        } else if (orderTyped.status === 'failed') {
+        }
+
+        // Order failed
+        if (orderTyped.status === 'failed' && orderTyped.completed_at) {
           newLogs.push({
             id: `order-failed-${orderTyped.id}`,
             timestamp: new Date(orderTyped.completed_at),
             type: 'order_fail',
-            message: `Échec: ${orderTyped.name} - ${orderTyped.error_message || 'Erreur inconnue'}`,
+            message: `❌ Échec: ${orderTyped.name} - ${orderTyped.error_message || 'Erreur inconnue'}`,
             details: { order_id: orderTyped.id, error: orderTyped.error_message },
           });
         }
-      }
-    });
+      });
+    }
 
     // Sort by timestamp descending and deduplicate
-    const sortedLogs = newLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-    const uniqueLogs = sortedLogs.filter((log, index, self) => 
-      index === self.findIndex(l => l.id === log.id)
-    ).slice(0, 100);
+    const allLogs = [...logs, ...newLogs];
+    const uniqueLogs = allLogs
+      .filter((log, index, self) => index === self.findIndex(l => l.id === log.id))
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, 100);
 
-    setLogs(uniqueLogs);
-  }, [orders, runner.last_seen_at, isPaused]);
+    // Only update if there are changes
+    if (JSON.stringify(uniqueLogs.map(l => l.id)) !== JSON.stringify(logs.map(l => l.id))) {
+      setLogs(uniqueLogs);
+    }
+  }, [orders, runnerData?.last_seen_at, isPaused]);
 
-  // Auto-scroll to bottom when new logs arrive
+  // Auto-scroll to top when new logs arrive
   useEffect(() => {
     if (!isPaused && scrollRef.current) {
       scrollRef.current.scrollTop = 0;
     }
-  }, [logs, isPaused]);
+  }, [logs.length, isPaused]);
 
   const clearLogs = () => {
     setLogs([]);
+    processedOrdersRef.current.clear();
+    lastHeartbeatRef.current = null;
   };
 
   const downloadLogs = () => {
@@ -159,8 +247,8 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
   const getLogTypeColor = (type: LogEntry['type']) => {
     switch (type) {
       case 'heartbeat': return 'text-blue-400';
-      case 'order_poll': return 'text-cyan-400';
-      case 'order_execute': return 'text-yellow-400';
+      case 'order_pending': return 'text-yellow-400';
+      case 'order_execute': return 'text-orange-400';
       case 'order_complete': return 'text-green-400';
       case 'order_fail': return 'text-red-400';
       case 'system': return 'text-purple-400';
@@ -171,7 +259,7 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
   const getLogTypeBadge = (type: LogEntry['type']) => {
     switch (type) {
       case 'heartbeat': return { label: 'HB', variant: 'secondary' as const };
-      case 'order_poll': return { label: 'POLL', variant: 'outline' as const };
+      case 'order_pending': return { label: 'WAIT', variant: 'outline' as const };
       case 'order_execute': return { label: 'EXEC', variant: 'default' as const };
       case 'order_complete': return { label: 'OK', variant: 'default' as const };
       case 'order_fail': return { label: 'ERR', variant: 'destructive' as const };
@@ -180,6 +268,8 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
     }
   };
 
+  const currentStatus = runnerData?.status || runner.status;
+
   return (
     <div className="space-y-3">
       {/* Header */}
@@ -187,8 +277,8 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
         <div className="flex items-center gap-2">
           <Terminal className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-medium">Logs en temps réel</span>
-          <Badge variant={runner.status === 'online' ? 'default' : 'secondary'} className="text-xs">
-            {runner.status}
+          <Badge variant={currentStatus === 'online' ? 'default' : 'secondary'} className="text-xs">
+            {currentStatus}
           </Badge>
           {!isPaused && (
             <span className="flex items-center gap-1">
