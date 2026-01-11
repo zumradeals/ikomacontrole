@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      infrastructures: {
+        Row: {
+          architecture: string | null
+          capabilities: Json | null
+          cpu_cores: number | null
+          created_at: string
+          created_by: string | null
+          disk_gb: number | null
+          distribution: string | null
+          id: string
+          name: string
+          notes: string | null
+          os: string | null
+          ram_gb: number | null
+          type: Database["public"]["Enums"]["infra_type"]
+          updated_at: string
+        }
+        Insert: {
+          architecture?: string | null
+          capabilities?: Json | null
+          cpu_cores?: number | null
+          created_at?: string
+          created_by?: string | null
+          disk_gb?: number | null
+          distribution?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          os?: string | null
+          ram_gb?: number | null
+          type?: Database["public"]["Enums"]["infra_type"]
+          updated_at?: string
+        }
+        Update: {
+          architecture?: string | null
+          capabilities?: Json | null
+          cpu_cores?: number | null
+          created_at?: string
+          created_by?: string | null
+          disk_gb?: number | null
+          distribution?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          os?: string | null
+          ram_gb?: number | null
+          type?: Database["public"]["Enums"]["infra_type"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       runners: {
         Row: {
           capabilities: Json | null
@@ -54,7 +105,15 @@ export type Database = {
           token_hash?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "runners_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       settings: {
         Row: {
@@ -94,7 +153,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      infra_type: "vps" | "bare_metal" | "cloud"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -221,6 +280,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      infra_type: ["vps", "bare_metal", "cloud"],
+    },
   },
 } as const
