@@ -20,7 +20,8 @@ import {
   Globe,
   Network,
   Lock,
-  Scan
+  Scan,
+  RotateCcw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -33,9 +34,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Infrastructure, useAssociateRunner } from '@/hooks/useInfrastructures';
+import { useSettings } from '@/hooks/useSettings';
 import { SystemOrdersDialog } from './SystemOrdersDialog';
 import { AutoDetectDialog } from './AutoDetectDialog';
 import { OrdersHistory } from './OrdersHistory';
+import { ReinstallScript } from '@/components/runner/ReinstallScript';
+import { RunnerLogs } from '@/components/runner/RunnerLogs';
 import { formatDistanceToNow, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -117,9 +121,14 @@ function CapabilityCard({ icon, label, sublabel, available }: CapabilityCardProp
 
 export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete }: InfraDetailsProps) {
   const associateRunner = useAssociateRunner();
+  const { getSetting } = useSettings();
   const [selectedRunner, setSelectedRunner] = useState<string>('');
   const [ordersDialogOpen, setOrdersDialogOpen] = useState(false);
   const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
+  const [reinstallDialogOpen, setReinstallDialogOpen] = useState(false);
+  const [selectedRunnerForReinstall, setSelectedRunnerForReinstall] = useState<Runner | null>(null);
+  
+  const apiBaseUrl = getSetting('runner_api_base_url');
 
   const TypeIcon = typeIcons[infrastructure.type] || HardDrive;
   const caps = (infrastructure.capabilities as Record<string, unknown>) || {};
@@ -364,6 +373,17 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => {
+                          setSelectedRunnerForReinstall(runner);
+                          setReinstallDialogOpen(true);
+                        }}
+                      >
+                        <RotateCcw className="w-4 h-4 mr-1" />
+                        Réinstaller
+                      </Button>
                       <Button asChild variant="ghost" size="sm">
                         <Link to="/runner">
                           <ExternalLink className="w-4 h-4 mr-1" />
@@ -393,6 +413,16 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
               </div>
             )}
           </section>
+
+          {/* Runner Logs Section */}
+          {associatedRunners.length > 0 && (
+            <section className="glass-panel rounded-xl p-6">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+                Activité du runner
+              </h2>
+              <RunnerLogs runner={associatedRunners[0]} />
+            </section>
+          )}
 
           {/* Orders History Section */}
           {associatedRunners.length > 0 && (
@@ -475,6 +505,16 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
           onOpenChange={setAutoDetectDialogOpen}
           runner={associatedRunners[0]}
           infrastructureId={infrastructure.id}
+        />
+      )}
+
+      {/* Reinstall Dialog */}
+      {selectedRunnerForReinstall && (
+        <ReinstallScript
+          open={reinstallDialogOpen}
+          onOpenChange={setReinstallDialogOpen}
+          runner={selectedRunnerForReinstall}
+          baseUrl={apiBaseUrl}
         />
       )}
     </div>
