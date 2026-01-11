@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2, Building2 } from 'lucide-react';
 import { useRunners, useDeleteRunner } from '@/hooks/useRunners';
+import { useInfrastructures } from '@/hooks/useInfrastructures';
 import {
   Table,
   TableBody,
@@ -52,8 +54,15 @@ function formatMemory(memoryMb: number): string {
 
 export function RunnersTable() {
   const { data: runners, isLoading, error } = useRunners();
+  const { data: infrastructures } = useInfrastructures();
   const deleteRunner = useDeleteRunner();
   const [runnerToDelete, setRunnerToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const getInfraName = (infraId: string | null) => {
+    if (!infraId || !infrastructures) return null;
+    const infra = infrastructures.find(i => i.id === infraId);
+    return infra?.name || null;
+  };
 
   const handleDelete = () => {
     if (runnerToDelete) {
@@ -100,6 +109,7 @@ export function RunnersTable() {
           <TableRow>
             <TableHead>Nom</TableHead>
             <TableHead>Statut</TableHead>
+            <TableHead>Infrastructure</TableHead>
             <TableHead>Système</TableHead>
             <TableHead>Ressources</TableHead>
             <TableHead>Dernière activité</TableHead>
@@ -130,6 +140,19 @@ export function RunnersTable() {
                     <StatusIcon className="w-3 h-3 mr-1" />
                     {config.label}
                   </Badge>
+                </TableCell>
+                <TableCell>
+                  {runner.infrastructure_id ? (
+                    <Link 
+                      to="/infra" 
+                      className="flex items-center gap-2 text-sm hover:text-primary transition-colors"
+                    >
+                      <Building2 className="w-4 h-4 text-muted-foreground" />
+                      <span>{getInfraName(runner.infrastructure_id) || 'Non trouvée'}</span>
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground text-sm">—</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   {hostInfo?.os || hostInfo?.arch ? (
