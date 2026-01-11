@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useState, useEffect } from 'react';
 
 interface Setting {
   id: string;
@@ -51,7 +52,44 @@ export function useSettings() {
     error,
     getSetting,
     updateSetting: (key: string, value: string) => 
-      updateSettingMutation.mutate({ key, value }),
+      updateSettingMutation.mutateAsync({ key, value }),
     isUpdating: updateSettingMutation.isPending,
+  };
+}
+
+// Hook for controlled input with local state
+export function useSettingInput(key: string) {
+  const { getSetting, updateSetting, isLoading, isUpdating } = useSettings();
+  const savedValue = getSetting(key);
+  const [localValue, setLocalValue] = useState(savedValue);
+  const [isDirty, setIsDirty] = useState(false);
+
+  // Sync local value when saved value changes (initial load)
+  useEffect(() => {
+    if (!isDirty) {
+      setLocalValue(savedValue);
+    }
+  }, [savedValue, isDirty]);
+
+  const handleChange = (value: string) => {
+    setLocalValue(value);
+    setIsDirty(true);
+  };
+
+  const handleSave = async () => {
+    if (isDirty && localValue !== savedValue) {
+      await updateSetting(key, localValue);
+      setIsDirty(false);
+    }
+  };
+
+  return {
+    value: localValue,
+    savedValue,
+    onChange: handleChange,
+    onSave: handleSave,
+    isLoading,
+    isUpdating,
+    isDirty,
   };
 }
