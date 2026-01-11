@@ -35,6 +35,7 @@ import {
 import { Infrastructure, useAssociateRunner } from '@/hooks/useInfrastructures';
 import { SystemOrdersDialog } from './SystemOrdersDialog';
 import { AutoDetectDialog } from './AutoDetectDialog';
+import { OrdersHistory } from './OrdersHistory';
 import { formatDistanceToNow, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -392,6 +393,19 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
               </div>
             )}
           </section>
+
+          {/* Orders History Section */}
+          {associatedRunners.length > 0 && (
+            <section className="glass-panel rounded-xl p-6">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+                Historique des ordres
+              </h2>
+              <OrdersHistory 
+                runnerId={associatedRunners[0].id} 
+                infrastructureId={infrastructure.id}
+              />
+            </section>
+          )}
         </div>
 
         {/* Sidebar */}
