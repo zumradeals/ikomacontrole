@@ -1,22 +1,38 @@
-import { Server, Plus, RefreshCw, Terminal, Settings2 } from 'lucide-react';
+import { Server, RefreshCw, Terminal, Settings2, Save } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useSettings } from '@/hooks/useSettings';
+import { useSettingInput } from '@/hooks/useSettings';
 import { useAppMode } from '@/contexts/AppModeContext';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { RunnersTable } from '@/components/runner/RunnersTable';
 import { InstallScript } from '@/components/runner/InstallScript';
 import { useRunners } from '@/hooks/useRunners';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from 'sonner';
 
 const Runner = () => {
-  const { getSetting, updateSetting, isLoading: settingsLoading, isUpdating } = useSettings();
+  const { 
+    value: runnerBaseUrl, 
+    onChange: setRunnerBaseUrl, 
+    onSave: saveRunnerBaseUrl,
+    isLoading: settingsLoading, 
+    isUpdating,
+    isDirty 
+  } = useSettingInput('runner_base_url');
+  
   const { isExpert } = useAppMode();
   const { refetch: refetchRunners } = useRunners();
 
-  const runnerBaseUrl = getSetting('runner_base_url');
+  const handleSave = async () => {
+    try {
+      await saveRunnerBaseUrl();
+      toast.success('Configuration sauvegardée');
+    } catch (error) {
+      toast.error('Erreur lors de la sauvegarde');
+    }
+  };
 
   if (settingsLoading) {
     return (
@@ -54,13 +70,22 @@ const Runner = () => {
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="runner_base_url">URL de base du Runner API</Label>
-            <Input
-              id="runner_base_url"
-              placeholder="https://lqocccsxzqnbcwshseom.supabase.co/functions/v1/runner-api"
-              value={runnerBaseUrl}
-              onChange={(e) => updateSetting('runner_base_url', e.target.value)}
-              disabled={isUpdating}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="runner_base_url"
+                placeholder="https://lqocccsxzqnbcwshseom.supabase.co/functions/v1/runner-api"
+                value={runnerBaseUrl}
+                onChange={(e) => setRunnerBaseUrl(e.target.value)}
+              />
+              <Button 
+                onClick={handleSave} 
+                disabled={!isDirty || isUpdating}
+                variant={isDirty ? "default" : "outline"}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {isUpdating ? 'Sauvegarde...' : 'Sauvegarder'}
+              </Button>
+            </div>
             <p className="text-xs text-muted-foreground">
               URL où les runners peuvent contacter l'API. Utilisez l'URL de votre Edge Function.
             </p>
