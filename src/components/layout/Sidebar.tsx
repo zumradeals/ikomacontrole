@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
 import { ModeToggle } from './ModeToggle';
+import { UserMenu } from './UserMenu';
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -92,6 +93,11 @@ export function Sidebar() {
       {/* Mode Toggle */}
       <div className="p-3 border-t border-sidebar-border">
         <ModeToggle collapsed={collapsed} />
+      </div>
+
+      {/* User Menu */}
+      <div className="p-3 border-t border-sidebar-border">
+        <UserMenu collapsed={collapsed} />
       </div>
     </aside>
   );

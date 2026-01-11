@@ -1,9 +1,12 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Hexagon, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import { toast } from 'sonner';
 
 type AuthMode = 'login' | 'register';
 
@@ -12,12 +15,42 @@ const Auth = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { signIn, signUp, user } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect if already logged in
+  if (user) {
+    navigate('/');
+    return null;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // TODO: Connect to Supabase Auth
-    setTimeout(() => setIsLoading(false), 1500);
+
+    try {
+      if (mode === 'login') {
+        const { error } = await signIn(email, password);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          toast.success('Connexion réussie');
+          navigate('/');
+        }
+      } else {
+        const { error } = await signUp(email, password);
+        if (error) {
+          toast.error(error.message);
+        } else {
+          toast.success('Compte créé avec succès');
+          navigate('/');
+        }
+      }
+    } catch (error) {
+      toast.error('Une erreur est survenue');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -37,6 +70,7 @@ const Auth = () => {
           {/* Mode Toggle */}
           <div className="flex items-center gap-1 p-1 bg-muted/50 rounded-lg mb-6">
             <button
+              type="button"
               onClick={() => setMode('login')}
               className={cn(
                 "flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all",
@@ -48,6 +82,7 @@ const Auth = () => {
               Connexion
             </button>
             <button
+              type="button"
               onClick={() => setMode('register')}
               className={cn(
                 "flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all",
@@ -90,6 +125,7 @@ const Auth = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10"
                   required
+                  minLength={6}
                 />
               </div>
             </div>
