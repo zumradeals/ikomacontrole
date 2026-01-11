@@ -49,6 +49,90 @@ Deno.serve(async (req) => {
       )
     }
 
+    // GET /install-runner.sh - Installation script
+    if (req.method === 'GET' && path === '/install-runner.sh') {
+      const installScript = `#!/bin/bash
+set -e
+
+# Parse arguments
+TOKEN=""
+API_URL=""
+
+while [[ \$# -gt 0 ]]; do
+  case \$1 in
+    --token)
+      TOKEN="\$2"
+      shift 2
+      ;;
+    --api-url)
+      API_URL="\$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: \$1"
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "\$TOKEN" ] || [ -z "\$API_URL" ]; then
+  echo "Usage: install-runner.sh --token <token> --api-url <api-url>"
+  exit 1
+fi
+
+echo "=== Ikoma Runner Installation ==="
+echo "API URL: \$API_URL"
+echo ""
+
+# Get hostname for runner name
+RUNNER_NAME=\$(hostname)
+
+# Collect host info
+HOST_INFO=\$(cat <<EOF
+{
+  "hostname": "\$(hostname)",
+  "os": "\$(uname -s)",
+  "arch": "\$(uname -m)",
+  "kernel": "\$(uname -r)"
+}
+EOF
+)
+
+echo "Registering runner '\$RUNNER_NAME'..."
+
+# Register with the API
+RESPONSE=\$(curl -s -X POST "\$API_URL/register" \\
+  -H "Content-Type: application/json" \\
+  -d "{
+    \\"name\\": \\"\$RUNNER_NAME\\",
+    \\"token\\": \\"\$TOKEN\\",
+    \\"host_info\\": \$HOST_INFO,
+    \\"capabilities\\": {}
+  }")
+
+echo "Response: \$RESPONSE"
+
+# Check if registration was successful
+if echo "\$RESPONSE" | grep -q '"success":true'; then
+  echo ""
+  echo "✓ Runner registered successfully!"
+  echo ""
+  echo "To send heartbeats, use:"
+  echo "  curl -X POST \$API_URL/heartbeat -H 'x-runner-token: \$TOKEN'"
+else
+  echo ""
+  echo "✗ Registration failed"
+  exit 1
+fi
+`
+      return new Response(installScript, { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'text/plain; charset=utf-8' 
+        } 
+      })
+    }
+
     // Initialize Supabase client with service role for runner operations
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
