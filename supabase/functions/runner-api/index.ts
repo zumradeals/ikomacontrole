@@ -386,7 +386,7 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
       )
     }
 
-    // GET /orders/poll - Poll for pending orders (stub)
+    // GET /orders/poll - Poll for pending orders
     if (req.method === 'GET' && path === '/orders/poll') {
       const runnerToken = req.headers.get('x-runner-token')
       if (!runnerToken) {
@@ -416,14 +416,24 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
         )
       }
 
-      // Return empty orders for now (stub)
+      // Fetch pending orders for this runner
+      const { data: orders, error: ordersError } = await supabase
+        .from('orders')
+        .select('id, category, name, command, created_at')
+        .eq('runner_id', runner.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(10)
+
+      if (ordersError) throw ordersError
+
       return new Response(
-        JSON.stringify({ orders: [] }),
+        JSON.stringify({ orders: orders || [] }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // POST /orders/report - Report order execution (stub)
+    // POST /orders/report - Report order execution
     if (req.method === 'POST' && path === '/orders/report') {
       const runnerToken = req.headers.get('x-runner-token')
       if (!runnerToken) {
@@ -433,7 +443,89 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
         )
       }
 
-      // Just acknowledge for now
+      // Verify runner
+      const encoder = new TextEncoder()
+      const data = encoder.encode(runnerToken)
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+
+      const { data: runner } = await supabase
+        .from('runners')
+        .select('id')
+        .eq('token_hash', tokenHash)
+        .maybeSingle()
+
+      if (!runner) {
+        return new Response(
+          JSON.stringify({ error: 'Runner not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const body = await req.json()
+      const { order_id, status, result, error_message } = body
+
+      if (!order_id || !status) {
+        return new Response(
+          JSON.stringify({ error: 'order_id and status are required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Update order status
+      const updateData: Record<string, unknown> = {
+        status,
+        result: result || {},
+      }
+
+      if (status === 'running') {
+        updateData.started_at = new Date().toISOString()
+      } else if (status === 'completed' || status === 'failed') {
+        updateData.completed_at = new Date().toISOString()
+      }
+
+      if (error_message) {
+        updateData.error_message = error_message
+      }
+
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update(updateData)
+        .eq('id', order_id)
+        .eq('runner_id', runner.id)
+
+      if (updateError) throw updateError
+
+      // If detection order completed, update infrastructure capabilities
+      if (status === 'completed' && result?.capabilities) {
+        const { data: order } = await supabase
+          .from('orders')
+          .select('infrastructure_id, category')
+          .eq('id', order_id)
+          .single()
+
+        if (order?.category === 'detection' && order?.infrastructure_id) {
+          const infraUpdate: Record<string, unknown> = {
+            capabilities: result.capabilities,
+          }
+
+          if (result.system) {
+            if (result.system.os) infraUpdate.os = result.system.os
+            if (result.system.architecture) infraUpdate.architecture = result.system.architecture
+            if (result.system.distribution) infraUpdate.distribution = result.system.distribution
+            if (result.system.cpu_cores) infraUpdate.cpu_cores = result.system.cpu_cores
+            if (result.system.ram_mb) infraUpdate.ram_gb = Math.round(result.system.ram_mb / 1024)
+            if (result.system.disk_gb) infraUpdate.disk_gb = result.system.disk_gb
+          }
+
+          await supabase
+            .from('infrastructures')
+            .update(infraUpdate)
+            .eq('id', order.infrastructure_id)
+        }
+      }
+
       return new Response(
         JSON.stringify({ success: true, message: 'Report received' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
