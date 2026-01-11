@@ -540,7 +540,7 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
       if (ordersError) throw ordersError
 
       return new Response(
-        JSON.stringify({ orders: orders || [] }),
+        JSON.stringify({ success: true, orders: orders || [] }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -575,7 +575,52 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
         )
       }
 
-      const body = await req.json()
+      const rawBody = await req.text()
+
+      const tryJson = (text: string) => {
+        try {
+          return JSON.parse(text)
+        } catch {
+          return null
+        }
+      }
+
+      // The runner should send JSON, but older scripts may send JS-like objects
+      // (e.g. {order_id:"...", status:"running"}) or urlencoded bodies.
+      let body: any = tryJson(rawBody)
+
+      if (!body && rawBody) {
+        // 1) Quote unquoted keys
+        // 2) Quote simple unquoted values (uuid/words) so JSON.parse can handle older runner payloads
+        let fixed = rawBody
+          .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":')
+          .replace(/:\s*([A-Za-z0-9_-]+)\s*(?=[,}])/g, (_m, v) => {
+            if (v === 'true' || v === 'false' || v === 'null') return `: ${v}`
+            if (/^-?\d+(?:\.\d+)?$/.test(v)) return `: ${v}`
+            return `: "${v}"`
+          })
+
+        body = tryJson(fixed)
+      }
+
+      if (!body && rawBody) {
+        const params = new URLSearchParams(rawBody)
+        if (params.has('order_id') && params.has('status')) {
+          body = Object.fromEntries(params.entries())
+          if (typeof body.result === 'string') {
+            body.result = tryJson(body.result) ?? body.result
+          }
+        }
+      }
+
+      if (!body) {
+        console.error('Invalid /orders/report body:', rawBody.slice(0, 500))
+        return new Response(
+          JSON.stringify({ error: 'Invalid request body' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
       const { order_id, status, result, error_message } = body
 
       if (!order_id || !status) {
