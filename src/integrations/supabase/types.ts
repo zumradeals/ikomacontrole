@@ -14,7 +14,78 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      runners: {
+        Row: {
+          capabilities: Json | null
+          created_at: string
+          created_by: string | null
+          host_info: Json | null
+          id: string
+          infrastructure_id: string | null
+          last_seen_at: string | null
+          name: string
+          status: string
+          token_hash: string
+          updated_at: string
+        }
+        Insert: {
+          capabilities?: Json | null
+          created_at?: string
+          created_by?: string | null
+          host_info?: Json | null
+          id?: string
+          infrastructure_id?: string | null
+          last_seen_at?: string | null
+          name: string
+          status?: string
+          token_hash: string
+          updated_at?: string
+        }
+        Update: {
+          capabilities?: Json | null
+          created_at?: string
+          created_by?: string | null
+          host_info?: Json | null
+          id?: string
+          infrastructure_id?: string | null
+          last_seen_at?: string | null
+          name?: string
+          status?: string
+          token_hash?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      settings: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          key: string
+          updated_at: string
+          updated_by: string | null
+          value: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          key: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          key?: string
+          updated_at?: string
+          updated_by?: string | null
+          value?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
