@@ -1,4 +1,4 @@
-import { Server, Wifi, WifiOff, Pause, HelpCircle } from 'lucide-react';
+import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone } from 'lucide-react';
 import { useRunners } from '@/hooks/useRunners';
 import {
   Table,
@@ -10,8 +10,19 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
+
+interface HostInfo {
+  hostname?: string;
+  os?: string;
+  arch?: string;
+  kernel?: string;
+  cpus?: number;
+  memory_mb?: number;
+  ip?: string;
+}
 
 const statusConfig = {
   online: { icon: Wifi, label: 'En ligne', variant: 'default' as const, className: 'bg-green-500/20 text-green-400 border-green-500/30' },
@@ -19,6 +30,13 @@ const statusConfig = {
   paused: { icon: Pause, label: 'En pause', variant: 'outline' as const, className: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
   unknown: { icon: HelpCircle, label: 'Inconnu', variant: 'outline' as const, className: 'bg-muted text-muted-foreground' },
 };
+
+function formatMemory(memoryMb: number): string {
+  if (memoryMb >= 1024) {
+    return `${(memoryMb / 1024).toFixed(1)} GB`;
+  }
+  return `${memoryMb} MB`;
+}
 
 export function RunnersTable() {
   const { data: runners, isLoading, error } = useRunners();
@@ -55,51 +73,109 @@ export function RunnersTable() {
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Nom</TableHead>
-          <TableHead>Statut</TableHead>
-          <TableHead>Dernière activité</TableHead>
-          <TableHead>Host</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {runners.map((runner) => {
-          const config = statusConfig[runner.status];
-          const StatusIcon = config.icon;
-          const hostInfo = runner.host_info as Record<string, string> | null;
-          
-          return (
-            <TableRow key={runner.id}>
-              <TableCell className="font-medium">
-                <div className="flex items-center gap-2">
-                  <Server className="w-4 h-4 text-primary" />
-                  {runner.name}
-                </div>
-              </TableCell>
-              <TableCell>
-                <Badge className={config.className}>
-                  <StatusIcon className="w-3 h-3 mr-1" />
-                  {config.label}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-muted-foreground text-sm">
-                {runner.last_seen_at 
-                  ? formatDistanceToNow(new Date(runner.last_seen_at), { 
-                      addSuffix: true, 
-                      locale: fr 
-                    })
-                  : 'Jamais'
-                }
-              </TableCell>
-              <TableCell className="text-muted-foreground text-sm font-mono">
-                {hostInfo?.hostname || hostInfo?.ip || '—'}
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <TooltipProvider>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Nom</TableHead>
+            <TableHead>Statut</TableHead>
+            <TableHead>Système</TableHead>
+            <TableHead>Ressources</TableHead>
+            <TableHead>Dernière activité</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {runners.map((runner) => {
+            const config = statusConfig[runner.status as keyof typeof statusConfig] || statusConfig.unknown;
+            const StatusIcon = config.icon;
+            const hostInfo = runner.host_info as HostInfo | null;
+            
+            return (
+              <TableRow key={runner.id}>
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    <Server className="w-4 h-4 text-primary" />
+                    <div>
+                      <div>{runner.name}</div>
+                      {hostInfo?.hostname && hostInfo.hostname !== runner.name && (
+                        <div className="text-xs text-muted-foreground">{hostInfo.hostname}</div>
+                      )}
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge className={config.className}>
+                    <StatusIcon className="w-3 h-3 mr-1" />
+                    {config.label}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {hostInfo?.os || hostInfo?.arch ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-2 text-sm">
+                          <MonitorSmartphone className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-mono">
+                            {hostInfo.os || '?'} / {hostInfo.arch || '?'}
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <div className="text-xs space-y-1">
+                          <div>OS: {hostInfo.os || 'Inconnu'}</div>
+                          <div>Arch: {hostInfo.arch || 'Inconnue'}</div>
+                          {hostInfo.kernel && <div>Kernel: {hostInfo.kernel}</div>}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {(hostInfo?.cpus || hostInfo?.memory_mb) ? (
+                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                      {hostInfo.cpus && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center gap-1">
+                              <Cpu className="w-3.5 h-3.5" />
+                              <span>{hostInfo.cpus}</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>{hostInfo.cpus} CPU(s)</TooltipContent>
+                        </Tooltip>
+                      )}
+                      {hostInfo.memory_mb && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex items-center gap-1">
+                              <HardDrive className="w-3.5 h-3.5" />
+                              <span>{formatMemory(hostInfo.memory_mb)}</span>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>{formatMemory(hostInfo.memory_mb)} RAM</TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-muted-foreground text-sm">
+                  {runner.last_seen_at 
+                    ? formatDistanceToNow(new Date(runner.last_seen_at), { 
+                        addSuffix: true, 
+                        locale: fr 
+                      })
+                    : 'Jamais'
+                  }
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TooltipProvider>
   );
 }

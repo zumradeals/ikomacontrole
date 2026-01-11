@@ -54,6 +54,12 @@ Deno.serve(async (req) => {
       const installScript = `#!/bin/bash
 set -e
 
+# Colors for output
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m' # No Color
+
 # Parse arguments
 TOKEN=""
 API_URL=""
@@ -69,7 +75,7 @@ while [[ \$# -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Unknown option: \$1"
+      echo -e "\${RED}Unknown option: \$1\${NC}"
       exit 1
       ;;
   esac
@@ -80,7 +86,7 @@ if [ -z "\$TOKEN" ] || [ -z "\$API_URL" ]; then
   exit 1
 fi
 
-echo "=== Ikoma Runner Installation ==="
+echo -e "\${GREEN}=== Ikoma Runner Installation ===\${NC}"
 echo "API URL: \$API_URL"
 echo ""
 
@@ -93,7 +99,9 @@ HOST_INFO=\$(cat <<EOF
   "hostname": "\$(hostname)",
   "os": "\$(uname -s)",
   "arch": "\$(uname -m)",
-  "kernel": "\$(uname -r)"
+  "kernel": "\$(uname -r)",
+  "cpus": \$(nproc 2>/dev/null || echo 1),
+  "memory_mb": \$(free -m 2>/dev/null | awk '/^Mem:/{print \$2}' || echo 0)
 }
 EOF
 )
@@ -115,15 +123,83 @@ echo "Response: \$RESPONSE"
 # Check if registration was successful
 if echo "\$RESPONSE" | grep -q '"success":true'; then
   echo ""
-  echo "✓ Runner registered successfully!"
-  echo ""
-  echo "To send heartbeats, use:"
-  echo "  curl -X POST \$API_URL/heartbeat -H 'x-runner-token: \$TOKEN'"
+  echo -e "\${GREEN}✓ Runner registered successfully!\${NC}"
 else
   echo ""
-  echo "✗ Registration failed"
+  echo -e "\${RED}✗ Registration failed\${NC}"
   exit 1
 fi
+
+# Create systemd service
+echo ""
+echo -e "\${YELLOW}Creating systemd service...\${NC}"
+
+INSTALL_DIR="/opt/ikoma-runner"
+mkdir -p \$INSTALL_DIR
+
+# Create heartbeat script
+cat > \$INSTALL_DIR/heartbeat.sh << 'HEARTBEAT_EOF'
+#!/bin/bash
+API_URL="\$1"
+TOKEN="\$2"
+INTERVAL=\${3:-30}
+
+while true; do
+  RESPONSE=\$(curl -s -X POST "\$API_URL/heartbeat" -H "x-runner-token: \$TOKEN" 2>&1)
+  if echo "\$RESPONSE" | grep -q '"success":true'; then
+    echo "\$(date): Heartbeat sent successfully"
+  else
+    echo "\$(date): Heartbeat failed - \$RESPONSE"
+  fi
+  sleep \$INTERVAL
+done
+HEARTBEAT_EOF
+
+chmod +x \$INSTALL_DIR/heartbeat.sh
+
+# Save configuration
+cat > \$INSTALL_DIR/config << CONFIG_EOF
+API_URL="\$API_URL"
+TOKEN="\$TOKEN"
+HEARTBEAT_INTERVAL=30
+CONFIG_EOF
+
+chmod 600 \$INSTALL_DIR/config
+
+# Create systemd service file
+cat > /etc/systemd/system/ikoma-runner.service << SERVICE_EOF
+[Unit]
+Description=Ikoma Runner Heartbeat Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash \$INSTALL_DIR/heartbeat.sh "\$API_URL" "\$TOKEN" 30
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+# Reload systemd and enable service
+systemctl daemon-reload
+systemctl enable ikoma-runner.service
+systemctl start ikoma-runner.service
+
+echo ""
+echo -e "\${GREEN}✓ Systemd service installed and started!\${NC}"
+echo ""
+echo "Useful commands:"
+echo "  systemctl status ikoma-runner    - Check service status"
+echo "  journalctl -u ikoma-runner -f    - View logs"
+echo "  systemctl restart ikoma-runner   - Restart service"
+echo "  systemctl stop ikoma-runner      - Stop service"
+echo ""
+echo -e "\${GREEN}Installation complete!\${NC}"
 `
       return new Response(installScript, { 
         headers: { 
