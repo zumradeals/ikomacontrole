@@ -209,6 +209,60 @@ echo -e "\${GREEN}Installation complete!\${NC}"
       })
     }
 
+    // GET /uninstall-runner.sh - Uninstallation script
+    if (req.method === 'GET' && path === '/uninstall-runner.sh') {
+      const uninstallScript = `#!/bin/bash
+set -e
+
+# Colors for output
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m' # No Color
+
+echo -e "\${YELLOW}=== Ikoma Runner Uninstallation ===\${NC}"
+echo ""
+
+INSTALL_DIR="/opt/ikoma-runner"
+SERVICE_NAME="ikoma-runner"
+
+# Stop and disable the service
+if systemctl is-active --quiet \$SERVICE_NAME 2>/dev/null; then
+  echo "Stopping \$SERVICE_NAME service..."
+  systemctl stop \$SERVICE_NAME
+fi
+
+if systemctl is-enabled --quiet \$SERVICE_NAME 2>/dev/null; then
+  echo "Disabling \$SERVICE_NAME service..."
+  systemctl disable \$SERVICE_NAME
+fi
+
+# Remove service file
+if [ -f "/etc/systemd/system/\$SERVICE_NAME.service" ]; then
+  echo "Removing systemd service file..."
+  rm -f /etc/systemd/system/\$SERVICE_NAME.service
+  systemctl daemon-reload
+fi
+
+# Remove installation directory
+if [ -d "\$INSTALL_DIR" ]; then
+  echo "Removing installation directory..."
+  rm -rf \$INSTALL_DIR
+fi
+
+echo ""
+echo -e "\${GREEN}✓ Ikoma Runner uninstalled successfully!\${NC}"
+echo ""
+echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manually.\${NC}"
+`
+      return new Response(uninstallScript, { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'text/plain; charset=utf-8' 
+        } 
+      })
+    }
+
     // Initialize Supabase client with service role for runner operations
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!

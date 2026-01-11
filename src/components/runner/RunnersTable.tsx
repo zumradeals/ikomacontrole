@@ -1,5 +1,6 @@
-import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone } from 'lucide-react';
-import { useRunners } from '@/hooks/useRunners';
+import { useState } from 'react';
+import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2 } from 'lucide-react';
+import { useRunners, useDeleteRunner } from '@/hooks/useRunners';
 import {
   Table,
   TableBody,
@@ -9,8 +10,19 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
@@ -40,6 +52,15 @@ function formatMemory(memoryMb: number): string {
 
 export function RunnersTable() {
   const { data: runners, isLoading, error } = useRunners();
+  const deleteRunner = useDeleteRunner();
+  const [runnerToDelete, setRunnerToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const handleDelete = () => {
+    if (runnerToDelete) {
+      deleteRunner.mutate(runnerToDelete.id);
+      setRunnerToDelete(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -82,6 +103,7 @@ export function RunnersTable() {
             <TableHead>Système</TableHead>
             <TableHead>Ressources</TableHead>
             <TableHead>Dernière activité</TableHead>
+            <TableHead className="w-[50px]"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -171,11 +193,54 @@ export function RunnersTable() {
                     : 'Jamais'
                   }
                 </TableCell>
+                <TableCell>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => setRunnerToDelete({ id: runner.id, name: runner.name })}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Supprimer le runner</TooltipContent>
+                  </Tooltip>
+                </TableCell>
               </TableRow>
             );
           })}
         </TableBody>
       </Table>
+
+      <AlertDialog open={!!runnerToDelete} onOpenChange={() => setRunnerToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer le runner ?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Êtes-vous sûr de vouloir supprimer le runner <strong>{runnerToDelete?.name}</strong> ? 
+              Cette action est irréversible.
+              <br /><br />
+              <span className="text-yellow-500">
+                N'oubliez pas d'exécuter le script de désinstallation sur le serveur :
+              </span>
+              <code className="block mt-2 p-2 bg-muted rounded text-xs">
+                curl -sSL [API_URL]/uninstall-runner.sh | bash
+              </code>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 }
