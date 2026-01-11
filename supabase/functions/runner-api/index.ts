@@ -588,6 +588,7 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
       // The runner should send JSON, but older scripts may send JS-like objects
       // (e.g. {order_id:"...", status:"running"}) or urlencoded bodies.
       let body: any = tryJson(rawBody)
+      let parseMethod = 'json'
 
       if (!body && rawBody) {
         // 1) Quote unquoted keys
@@ -601,6 +602,7 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
           })
 
         body = tryJson(fixed)
+        if (body) parseMethod = 'fixed_json'
       }
 
       if (!body && rawBody) {
@@ -610,16 +612,37 @@ echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manua
           if (typeof body.result === 'string') {
             body.result = tryJson(body.result) ?? body.result
           }
+          parseMethod = 'urlencoded'
         }
       }
 
       if (!body) {
+        // Log the parse error to runner_logs
+        await supabase.from('runner_logs').insert({
+          runner_id: runner.id,
+          level: 'error',
+          event_type: 'report_parse_error',
+          message: 'Failed to parse /orders/report body',
+          raw_body: rawBody.slice(0, 5000),
+          error_details: 'Invalid JSON or unrecognized format',
+        })
+
         console.error('Invalid /orders/report body:', rawBody.slice(0, 500))
         return new Response(
           JSON.stringify({ error: 'Invalid request body' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+
+      // Log the successful report reception
+      await supabase.from('runner_logs').insert({
+        runner_id: runner.id,
+        level: 'info',
+        event_type: 'report_received',
+        message: `Report received: order=${body.order_id}, status=${body.status}`,
+        raw_body: rawBody.slice(0, 5000),
+        parsed_data: body,
+      })
 
       const { order_id, status, result, error_message } = body
 

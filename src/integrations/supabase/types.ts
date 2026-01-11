@@ -137,6 +137,53 @@ export type Database = {
           },
         ]
       }
+      runner_logs: {
+        Row: {
+          created_at: string
+          error_details: string | null
+          event_type: string
+          id: string
+          level: string
+          message: string
+          parsed_data: Json | null
+          raw_body: string | null
+          runner_id: string | null
+          timestamp: string
+        }
+        Insert: {
+          created_at?: string
+          error_details?: string | null
+          event_type: string
+          id?: string
+          level?: string
+          message: string
+          parsed_data?: Json | null
+          raw_body?: string | null
+          runner_id?: string | null
+          timestamp?: string
+        }
+        Update: {
+          created_at?: string
+          error_details?: string | null
+          event_type?: string
+          id?: string
+          level?: string
+          message?: string
+          parsed_data?: Json | null
+          raw_body?: string | null
+          runner_id?: string | null
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runner_logs_runner_id_fkey"
+            columns: ["runner_id"]
+            isOneToOne: false
+            referencedRelation: "runners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       runners: {
         Row: {
           capabilities: Json | null
