@@ -137,31 +137,131 @@ echo -e "\${YELLOW}Creating systemd service...\${NC}"
 INSTALL_DIR="/opt/ikoma-runner"
 mkdir -p \$INSTALL_DIR
 
-# Create heartbeat script
-cat > \$INSTALL_DIR/heartbeat.sh << 'HEARTBEAT_EOF'
+# Create main runner script (heartbeat + order polling + execution)
+cat > \$INSTALL_DIR/runner.sh << 'RUNNER_EOF'
 #!/bin/bash
 API_URL="\$1"
 TOKEN="\$2"
-INTERVAL=\${3:-30}
+HEARTBEAT_INTERVAL=\${3:-30}
+POLL_INTERVAL=\${4:-5}
 
-while true; do
+LAST_HEARTBEAT=0
+
+log() {
+  echo "\$(date '+%Y-%m-%d %H:%M:%S'): \$1"
+}
+
+send_heartbeat() {
   RESPONSE=\$(curl -s -X POST "\$API_URL/heartbeat" -H "x-runner-token: \$TOKEN" 2>&1)
   if echo "\$RESPONSE" | grep -q '"success":true'; then
-    echo "\$(date): Heartbeat sent successfully"
+    log "Heartbeat OK"
   else
-    echo "\$(date): Heartbeat failed - \$RESPONSE"
+    log "Heartbeat failed: \$RESPONSE"
   fi
-  sleep \$INTERVAL
-done
-HEARTBEAT_EOF
+}
 
-chmod +x \$INSTALL_DIR/heartbeat.sh
+poll_orders() {
+  ORDERS=\$(curl -s -X GET "\$API_URL/orders/poll" -H "x-runner-token: \$TOKEN" 2>&1)
+  
+  if ! echo "\$ORDERS" | grep -q '"success":true'; then
+    return
+  fi
+  
+  # Extract orders array
+  ORDER_COUNT=\$(echo "\$ORDERS" | jq -r '.orders | length' 2>/dev/null || echo 0)
+  
+  if [ "\$ORDER_COUNT" -gt 0 ]; then
+    log "Found \$ORDER_COUNT pending order(s)"
+    
+    for i in \$(seq 0 \$((ORDER_COUNT - 1))); do
+      ORDER_ID=\$(echo "\$ORDERS" | jq -r ".orders[\$i].id")
+      ORDER_NAME=\$(echo "\$ORDERS" | jq -r ".orders[\$i].name")
+      ORDER_CMD=\$(echo "\$ORDERS" | jq -r ".orders[\$i].command")
+      ORDER_CATEGORY=\$(echo "\$ORDERS" | jq -r ".orders[\$i].category")
+      
+      log "Executing order: \$ORDER_NAME (\$ORDER_ID)"
+      
+      # Report running status
+      curl -s -X POST "\$API_URL/orders/report" \\
+        -H "x-runner-token: \$TOKEN" \\
+        -H "Content-Type: application/json" \\
+        -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"running\", \"progress\": 0}" > /dev/null
+      
+      # Execute command and capture output
+      TMPFILE=\$(mktemp)
+      if bash -c "\$ORDER_CMD" > "\$TMPFILE" 2>&1; then
+        OUTPUT=\$(cat "\$TMPFILE")
+        log "Order completed successfully"
+        
+        # For detection orders, parse the result
+        if [ "\$ORDER_CATEGORY" = "detection" ]; then
+          RESULT=\$(echo "\$OUTPUT" | grep -A 100 '{"success":' | head -1)
+          curl -s -X POST "\$API_URL/orders/report" \\
+            -H "x-runner-token: \$TOKEN" \\
+            -H "Content-Type: application/json" \\
+            -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": \$RESULT}" > /dev/null
+        else
+          # Escape output for JSON
+          ESCAPED_OUTPUT=\$(echo "\$OUTPUT" | jq -Rs .)
+          curl -s -X POST "\$API_URL/orders/report" \\
+            -H "x-runner-token: \$TOKEN" \\
+            -H "Content-Type: application/json" \\
+            -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": {\"output\": \$ESCAPED_OUTPUT}}" > /dev/null
+        fi
+      else
+        EXIT_CODE=\$?
+        ERROR_OUTPUT=\$(cat "\$TMPFILE")
+        log "Order failed with exit code \$EXIT_CODE"
+        
+        ESCAPED_ERROR=\$(echo "\$ERROR_OUTPUT" | jq -Rs .)
+        curl -s -X POST "\$API_URL/orders/report" \\
+          -H "x-runner-token: \$TOKEN" \\
+          -H "Content-Type: application/json" \\
+          -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"failed\", \"error_message\": \$ESCAPED_ERROR}" > /dev/null
+      fi
+      
+      rm -f "\$TMPFILE"
+    done
+  fi
+}
+
+log "Starting Ikoma Runner"
+log "API URL: \$API_URL"
+log "Heartbeat interval: \${HEARTBEAT_INTERVAL}s, Poll interval: \${POLL_INTERVAL}s"
+
+# Check dependencies
+if ! command -v jq &> /dev/null; then
+  log "Installing jq..."
+  apt-get update && apt-get install -y jq 2>/dev/null || yum install -y jq 2>/dev/null || apk add jq 2>/dev/null
+fi
+
+# Initial heartbeat
+send_heartbeat
+
+while true; do
+  CURRENT_TIME=\$(date +%s)
+  
+  # Send heartbeat every HEARTBEAT_INTERVAL seconds
+  if [ \$((CURRENT_TIME - LAST_HEARTBEAT)) -ge \$HEARTBEAT_INTERVAL ]; then
+    send_heartbeat
+    LAST_HEARTBEAT=\$CURRENT_TIME
+  fi
+  
+  # Poll for orders
+  poll_orders
+  
+  sleep \$POLL_INTERVAL
+done
+RUNNER_EOF
+
+chmod +x \$INSTALL_DIR/runner.sh
 
 # Save configuration
 cat > \$INSTALL_DIR/config << CONFIG_EOF
 API_URL="\$API_URL"
 TOKEN="\$TOKEN"
 HEARTBEAT_INTERVAL=30
+POLL_INTERVAL=5
 CONFIG_EOF
 
 chmod 600 \$INSTALL_DIR/config
@@ -169,13 +269,13 @@ chmod 600 \$INSTALL_DIR/config
 # Create systemd service file
 cat > /etc/systemd/system/ikoma-runner.service << SERVICE_EOF
 [Unit]
-Description=Ikoma Runner Heartbeat Service
+Description=Ikoma Runner Service
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash \$INSTALL_DIR/heartbeat.sh "\$API_URL" "\$TOKEN" 30
+ExecStart=/bin/bash \$INSTALL_DIR/runner.sh "\$API_URL" "\$TOKEN" 30 5
 Restart=always
 RestartSec=10
 StandardOutput=journal
