@@ -21,7 +21,8 @@ import {
   Network,
   Lock,
   Scan,
-  RotateCcw
+  RotateCcw,
+  Code
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +39,7 @@ import { useSettings } from '@/hooks/useSettings';
 import { SystemOrdersDialog } from './SystemOrdersDialog';
 import { AutoDetectDialog } from './AutoDetectDialog';
 import { OrdersHistory } from './OrdersHistory';
+import { CustomOrderDialog } from './CustomOrderDialog';
 import { ReinstallScript } from '@/components/runner/ReinstallScript';
 import { RunnerLogs } from '@/components/runner/RunnerLogs';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -126,6 +128,7 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
   const [ordersDialogOpen, setOrdersDialogOpen] = useState(false);
   const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
   const [reinstallDialogOpen, setReinstallDialogOpen] = useState(false);
+  const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
   const [selectedRunnerForReinstall, setSelectedRunnerForReinstall] = useState<Runner | null>(null);
   
   const apiBaseUrl = getSetting('runner_api_base_url');
@@ -205,6 +208,15 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
           >
             <Terminal className="w-4 h-4 mr-2" />
             Ordres système
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setCustomOrderDialogOpen(true)}
+            disabled={associatedRunners.length === 0}
+          >
+            <Code className="w-4 h-4 mr-2" />
+            Commande custom
           </Button>
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="w-4 h-4 mr-2" />
@@ -515,6 +527,16 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
           onOpenChange={setReinstallDialogOpen}
           runner={selectedRunnerForReinstall}
           baseUrl={apiBaseUrl}
+        />
+      )}
+
+      {/* Custom Order Dialog */}
+      {associatedRunners.length > 0 && (
+        <CustomOrderDialog
+          open={customOrderDialogOpen}
+          onOpenChange={setCustomOrderDialogOpen}
+          runner={associatedRunners[0]}
+          infrastructureId={infrastructure.id}
         />
       )}
     </div>
