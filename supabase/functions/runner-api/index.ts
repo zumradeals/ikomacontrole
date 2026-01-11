@@ -13,21 +13,28 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url)
-  // Extract path after the function name - handle various URL formats
-  let path = url.pathname
-  // Remove the functions prefix if present
-  const fnMatch = path.match(/\/functions\/v1\/runner-api(.*)/)
-  if (fnMatch) {
-    path = fnMatch[1] || '/'
+  const pathname = url.pathname
+  
+  // Log for debugging
+  console.log('Incoming request:', req.method, pathname)
+  
+  // Extract path - the pathname will be like /runner-api/health or /functions/v1/runner-api/health
+  let path = pathname
+  
+  // Handle /functions/v1/runner-api prefix
+  if (path.includes('/runner-api')) {
+    const idx = path.indexOf('/runner-api')
+    path = path.substring(idx + '/runner-api'.length)
   }
-  // Ensure path starts with /
-  if (!path.startsWith('/')) {
+  
+  // Normalize: ensure starts with / and handle empty
+  if (!path || path === '') {
+    path = '/'
+  } else if (!path.startsWith('/')) {
     path = '/' + path
   }
-  // Normalize empty path to root
-  if (path === '') {
-    path = '/'
-  }
+  
+  console.log('Normalized path:', path)
 
   try {
     // GET /health - Public health check
