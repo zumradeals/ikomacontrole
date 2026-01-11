@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 interface Runner {
   id: string;
@@ -74,4 +75,33 @@ export function useRunners() {
   }, [query]);
 
   return query;
+}
+
+export function useDeleteRunner() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (runnerId: string) => {
+      const { error } = await supabase
+        .from('runners')
+        .delete()
+        .eq('id', runnerId);
+      
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['runners'] });
+      toast({
+        title: 'Runner supprimé',
+        description: 'Le runner a été supprimé avec succès.',
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erreur',
+        description: `Impossible de supprimer le runner: ${error.message}`,
+        variant: 'destructive',
+      });
+    },
+  });
 }
