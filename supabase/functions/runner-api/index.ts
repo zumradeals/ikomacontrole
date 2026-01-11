@@ -13,7 +13,21 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url)
-  const path = url.pathname.replace('/functions/v1/runner-api', '')
+  // Extract path after the function name - handle various URL formats
+  let path = url.pathname
+  // Remove the functions prefix if present
+  const fnMatch = path.match(/\/functions\/v1\/runner-api(.*)/)
+  if (fnMatch) {
+    path = fnMatch[1] || '/'
+  }
+  // Ensure path starts with /
+  if (!path.startsWith('/')) {
+    path = '/' + path
+  }
+  // Normalize empty path to root
+  if (path === '') {
+    path = '/'
+  }
 
   try {
     // GET /health - Public health check
