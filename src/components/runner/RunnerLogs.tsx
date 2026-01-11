@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Terminal, Trash2, Download, Pause, Play } from 'lucide-react';
+import { Terminal, Trash2, Download, Pause, Play, ChevronDown, ChevronRight, Code } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -22,9 +22,79 @@ interface RunnerLogsProps {
 interface LogEntry {
   id: string;
   timestamp: Date;
-  type: 'heartbeat' | 'order_pending' | 'order_execute' | 'order_complete' | 'order_fail' | 'system';
+  type: 'heartbeat' | 'order_pending' | 'order_execute' | 'order_complete' | 'order_fail' | 'system' | 'api_report' | 'api_error';
   message: string;
   details?: Record<string, unknown>;
+  rawBody?: string;
+}
+
+// LogLine component to display a single log entry with expandable raw body
+function LogLine({ 
+  log, 
+  getLogTypeBadge, 
+  getLogTypeColor 
+}: { 
+  log: LogEntry; 
+  getLogTypeBadge: (type: LogEntry['type']) => { label: string; variant: 'secondary' | 'outline' | 'default' | 'destructive' };
+  getLogTypeColor: (type: LogEntry['type']) => string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = log.rawBody || (log.details && Object.keys(log.details).length > 0);
+  
+  return (
+    <div className="hover:bg-white/5 rounded px-1 -mx-1">
+      <div className="flex items-start gap-2">
+        {hasDetails ? (
+          <button 
+            onClick={() => setExpanded(!expanded)} 
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+        ) : (
+          <span className="w-3" />
+        )}
+        <span className="text-muted-foreground shrink-0">
+          {format(log.timestamp, "HH:mm:ss", { locale: fr })}
+        </span>
+        <Badge 
+          variant={getLogTypeBadge(log.type).variant} 
+          className="text-[10px] px-1 py-0 h-4 shrink-0"
+        >
+          {getLogTypeBadge(log.type).label}
+        </Badge>
+        <span className={getLogTypeColor(log.type)}>
+          {log.message}
+        </span>
+      </div>
+      {expanded && hasDetails && (
+        <div className="ml-8 mt-1 mb-2 p-2 bg-black/30 rounded border border-border/30 text-[10px]">
+          {log.details && Object.keys(log.details).length > 0 && (
+            <div className="mb-2">
+              <div className="flex items-center gap-1 text-cyan-400 mb-1">
+                <Code className="w-3 h-3" />
+                <span>Parsed Data:</span>
+              </div>
+              <pre className="text-muted-foreground whitespace-pre-wrap break-all">
+                {JSON.stringify(log.details, null, 2)}
+              </pre>
+            </div>
+          )}
+          {log.rawBody && (
+            <div>
+              <div className="flex items-center gap-1 text-orange-400 mb-1">
+                <Terminal className="w-3 h-3" />
+                <span>Raw Body:</span>
+              </div>
+              <pre className="text-muted-foreground whitespace-pre-wrap break-all max-h-40 overflow-auto">
+                {log.rawBody}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function RunnerLogs({ runner }: RunnerLogsProps) {
@@ -68,11 +138,28 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
     refetchInterval: isPaused ? false : 2000,
   });
 
-  // Setup Realtime subscription for orders
+  // Fetch API logs (reports received, parse errors, etc.)
+  const { data: apiLogs } = useQuery({
+    queryKey: ['runner-api-logs', runner.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('runner_logs')
+        .select('*')
+        .eq('runner_id', runner.id)
+        .order('timestamp', { ascending: false })
+        .limit(50);
+      
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: isPaused ? false : 2000,
+  });
+
+  // Setup Realtime subscription for orders and API logs
   useEffect(() => {
     if (isPaused) return;
 
-    const channel = supabase
+    const ordersChannel = supabase
       .channel(`runner-orders-${runner.id}`)
       .on(
         'postgres_changes',
@@ -83,14 +170,30 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
           filter: `runner_id=eq.${runner.id}`,
         },
         () => {
-          // Refetch orders when any change occurs
           queryClient.invalidateQueries({ queryKey: ['runner-logs-orders', runner.id] });
         }
       )
       .subscribe();
 
+    const logsChannel = supabase
+      .channel(`runner-api-logs-${runner.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'runner_logs',
+          filter: `runner_id=eq.${runner.id}`,
+        },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ['runner-api-logs', runner.id] });
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(logsChannel);
     };
   }, [runner.id, isPaused, queryClient]);
 
@@ -119,12 +222,11 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
     };
   }, [runner.id, isPaused, queryClient]);
 
-  // Generate logs from orders and heartbeats
+  // Generate logs from orders, heartbeats, and API logs
   useEffect(() => {
     if (isPaused) return;
 
     const newLogs: LogEntry[] = [];
-    const currentTime = new Date();
 
     // Add heartbeat log if last_seen_at changed
     const lastSeen = runnerData?.last_seen_at;
@@ -152,11 +254,6 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
           result: unknown;
           updated_at: string;
         };
-
-        // Track which order states we've already logged
-        const createdKey = `created-${orderTyped.id}`;
-        const startedKey = `started-${orderTyped.id}`;
-        const completedKey = `completed-${orderTyped.id}`;
 
         // Order pending (created but not started)
         if (orderTyped.status === 'pending') {
@@ -204,6 +301,32 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
       });
     }
 
+    // Add API logs (reports received, parse errors)
+    if (apiLogs) {
+      apiLogs.forEach((log: {
+        id: string;
+        timestamp: string;
+        level: string;
+        event_type: string;
+        message: string;
+        raw_body: string | null;
+        parsed_data: unknown;
+        error_details: string | null;
+      }) => {
+        const isError = log.level === 'error';
+        newLogs.push({
+          id: `api-${log.id}`,
+          timestamp: new Date(log.timestamp),
+          type: isError ? 'api_error' : 'api_report',
+          message: isError 
+            ? `🔴 ${log.message}${log.error_details ? ` - ${log.error_details}` : ''}`
+            : `📨 ${log.message}`,
+          details: log.parsed_data as Record<string, unknown> | undefined,
+          rawBody: log.raw_body || undefined,
+        });
+      });
+    }
+
     // Sort by timestamp descending and deduplicate
     const allLogs = [...logs, ...newLogs];
     const uniqueLogs = allLogs
@@ -215,7 +338,7 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
     if (JSON.stringify(uniqueLogs.map(l => l.id)) !== JSON.stringify(logs.map(l => l.id))) {
       setLogs(uniqueLogs);
     }
-  }, [orders, runnerData?.last_seen_at, isPaused]);
+  }, [orders, runnerData?.last_seen_at, apiLogs, isPaused]);
 
   // Auto-scroll to top when new logs arrive
   useEffect(() => {
@@ -252,6 +375,8 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
       case 'order_complete': return 'text-green-400';
       case 'order_fail': return 'text-red-400';
       case 'system': return 'text-purple-400';
+      case 'api_report': return 'text-cyan-400';
+      case 'api_error': return 'text-red-500';
       default: return 'text-muted-foreground';
     }
   };
@@ -264,6 +389,8 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
       case 'order_complete': return { label: 'OK', variant: 'default' as const };
       case 'order_fail': return { label: 'ERR', variant: 'destructive' as const };
       case 'system': return { label: 'SYS', variant: 'secondary' as const };
+      case 'api_report': return { label: 'API', variant: 'default' as const };
+      case 'api_error': return { label: 'API!', variant: 'destructive' as const };
       default: return { label: '???', variant: 'outline' as const };
     }
   };
@@ -339,20 +466,7 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
             </div>
           ) : (
             logs.map(log => (
-              <div key={log.id} className="flex items-start gap-2 hover:bg-white/5 rounded px-1 -mx-1">
-                <span className="text-muted-foreground shrink-0">
-                  {format(log.timestamp, "HH:mm:ss", { locale: fr })}
-                </span>
-                <Badge 
-                  variant={getLogTypeBadge(log.type).variant} 
-                  className="text-[10px] px-1 py-0 h-4 shrink-0"
-                >
-                  {getLogTypeBadge(log.type).label}
-                </Badge>
-                <span className={getLogTypeColor(log.type)}>
-                  {log.message}
-                </span>
-              </div>
+              <LogLine key={log.id} log={log} getLogTypeBadge={getLogTypeBadge} getLogTypeColor={getLogTypeColor} />
             ))
           )}
         </div>
