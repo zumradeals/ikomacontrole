@@ -11,7 +11,9 @@ import Auth from "./pages/Auth";
 import Runner from "./pages/Runner";
 import Infra from "./pages/Infra";
 import Platform from "./pages/Platform";
+import SupabaseSetup from "./pages/SupabaseSetup";
 import Deployer from "./pages/Deployer";
+import DeployerWizard from "./pages/DeployerWizard";
 import Gateway from "./pages/Gateway";
 import Live from "./pages/Live";
 import ActivityPage from "./pages/ActivityPage";
@@ -39,7 +41,9 @@ const App = () => (
                       <Route path="/runner" element={<Runner />} />
                       <Route path="/infra" element={<Infra />} />
                       <Route path="/platform" element={<Platform />} />
+                      <Route path="/platform/supabase" element={<SupabaseSetup />} />
                       <Route path="/deployer" element={<Deployer />} />
+                      <Route path="/deployer/new" element={<DeployerWizard />} />
                       <Route path="/gateway" element={<Gateway />} />
                       <Route path="/live" element={<Live />} />
                       <Route path="/activity" element={<ActivityPage />} />

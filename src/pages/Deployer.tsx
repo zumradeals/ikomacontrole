@@ -100,7 +100,7 @@ const Deployer = () => {
                 Historique
               </Button>
             )}
-            <Button size="sm" onClick={() => setWizardOpen(true)}>
+            <Button size="sm" onClick={() => window.location.href = '/deployer/new'}>
               <Plus className="w-4 h-4 mr-2" />
               Nouveau Déploiement
             </Button>
@@ -119,7 +119,7 @@ const Deployer = () => {
             <p className="text-sm text-muted-foreground mb-3">
               Suivez l'assistant pour déployer votre application en 4 étapes simples
             </p>
-            <Button onClick={() => setWizardOpen(true)}>
+            <Button onClick={() => window.location.href = '/deployer/new'}>
               <Play className="w-4 h-4 mr-2" />
               Lancer l'Assistant
             </Button>
