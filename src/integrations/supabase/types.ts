@@ -330,6 +330,77 @@ export type Database = {
           },
         ]
       }
+      platform_instances: {
+        Row: {
+          config: Json | null
+          created_at: string
+          created_by: string | null
+          domain: string | null
+          id: string
+          infrastructure_id: string
+          installed_at: string | null
+          last_verified_at: string | null
+          port: number | null
+          service_type: string
+          status: string
+          supabase_anon_key: string | null
+          supabase_jwt_secret: string | null
+          supabase_postgres_password: string | null
+          supabase_project_ref: string | null
+          supabase_service_role_key: string | null
+          supabase_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          config?: Json | null
+          created_at?: string
+          created_by?: string | null
+          domain?: string | null
+          id?: string
+          infrastructure_id: string
+          installed_at?: string | null
+          last_verified_at?: string | null
+          port?: number | null
+          service_type: string
+          status?: string
+          supabase_anon_key?: string | null
+          supabase_jwt_secret?: string | null
+          supabase_postgres_password?: string | null
+          supabase_project_ref?: string | null
+          supabase_service_role_key?: string | null
+          supabase_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          config?: Json | null
+          created_at?: string
+          created_by?: string | null
+          domain?: string | null
+          id?: string
+          infrastructure_id?: string
+          installed_at?: string | null
+          last_verified_at?: string | null
+          port?: number | null
+          service_type?: string
+          status?: string
+          supabase_anon_key?: string | null
+          supabase_jwt_secret?: string | null
+          supabase_postgres_password?: string | null
+          supabase_project_ref?: string | null
+          supabase_service_role_key?: string | null
+          supabase_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_instances_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       runner_logs: {
         Row: {
           created_at: string
