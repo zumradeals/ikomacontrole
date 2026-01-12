@@ -55,20 +55,18 @@ export function CaddyDomainRegistry({
   const updateRoute = useUpdateCaddyRoute();
   const createOrder = useCreateOrder();
 
-  // Trouver un runner actif pour cette infrastructure
-  const activeRunner = useMemo(() => {
+  // Trouver le runner associé à cette infrastructure (même offline)
+  const associatedRunner = useMemo(() => {
     if (providedRunnerId) {
-      const runner = runners.find(r => r.id === providedRunnerId);
-      return runner?.status === 'online' ? runner : null;
+      return runners.find(r => r.id === providedRunnerId) || null;
     }
-    // Trouver le premier runner online associé à cette infrastructure
-    return runners.find(r => 
-      r.infrastructure_id === infrastructureId && 
-      r.status === 'online'
-    ) || null;
+    return runners.find(r => r.infrastructure_id === infrastructureId) || null;
   }, [runners, providedRunnerId, infrastructureId]);
 
+  // Vérifier si le runner associé est en ligne
+  const activeRunner = associatedRunner?.status === 'online' ? associatedRunner : null;
   const hasActiveRunner = !!activeRunner;
+  const hasOfflineRunner = !!associatedRunner && !activeRunner;
 
   // Générer le script Caddy pour un domaine
   const generateCaddyScript = (fullDomain: string, backendUrl: string) => {
@@ -319,13 +317,24 @@ fi
         </Button>
       </div>
 
-      {/* Warning si pas de runner actif */}
-      {!hasActiveRunner && (
+      {/* Warning si runner offline */}
+      {hasOfflineRunner && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            <strong>Aucun runner actif sur cette infrastructure.</strong>{' '}
-            Les ordres Caddy ne peuvent pas être exécutés sans runner en ligne.
+            <strong>Le runner "{associatedRunner?.name}" est hors ligne.</strong>{' '}
+            Les ordres Caddy ne seront exécutés que lorsque le runner sera de nouveau en ligne.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Warning si aucun runner associé */}
+      {!associatedRunner && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Aucun runner associé à cette infrastructure.</strong>{' '}
+            Associez un runner depuis la page Runners pour exécuter les ordres Caddy.
           </AlertDescription>
         </Alert>
       )}
