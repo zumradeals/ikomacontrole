@@ -6,7 +6,15 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
-// Helper to hash token
+// === CONSTANTS ===
+const RUNNER_VERSION = '2.1.0'
+const HEARTBEAT_INTERVAL_SECONDS = 30
+const POLL_INTERVAL_SECONDS = 5
+const RUNNER_OFFLINE_THRESHOLD_SECONDS = 60
+const ORDER_TIMEOUT_MINUTES = 15
+
+// === HELPERS ===
+
 async function hashToken(token: string): Promise<string> {
   const encoder = new TextEncoder()
   const data = encoder.encode(token)
@@ -15,39 +23,29 @@ async function hashToken(token: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-// Helper to get runner by token
 async function getRunnerByToken(supabase: any, token: string) {
   const tokenHash = await hashToken(token)
   const { data: runner } = await supabase
     .from('runners')
-    .select('id, status, name')
+    .select('id, status, name, infrastructure_id')
     .eq('token_hash', tokenHash)
     .maybeSingle()
   return runner
 }
 
-// Determine final status based on exit_code (source of truth)
+// Determine final order status based on exit_code (source of truth)
 function determineOrderStatus(exitCode: number | null, reportedStatus: string): 'running' | 'completed' | 'failed' {
-  // If running, keep as running
   if (reportedStatus === 'running') return 'running'
-  
-  // Use exit_code as source of truth for final status
   if (exitCode === 0) return 'completed'
   if (exitCode !== null && exitCode !== 0) return 'failed'
-  
-  // Fallback to reported status if no exit_code
   if (reportedStatus === 'completed' || reportedStatus === 'applied') return 'completed'
   if (reportedStatus === 'failed') return 'failed'
-  
-  // Default to failed if ambiguous with finished report
   return 'failed'
 }
 
-// Extract capabilities JSON from stdout (playbooks print {"capabilities":{...}})
+// Extract capabilities from stdout
 function extractCapabilitiesFromStdout(stdout: string): Record<string, string> | null {
   if (!stdout) return null
-  
-  // Look for lines containing capabilities JSON
   const lines = stdout.split('\n')
   for (const line of lines) {
     const trimmed = line.trim()
@@ -57,43 +55,36 @@ function extractCapabilitiesFromStdout(stdout: string): Record<string, string> |
         if (parsed.capabilities && typeof parsed.capabilities === 'object') {
           return parsed.capabilities as Record<string, string>
         }
-      } catch {
-        continue
-      }
+      } catch { continue }
     }
   }
   return null
 }
 
-// Extract system info from stdout (detection playbooks print {"system":{...}})
+// Extract system info from stdout
 function extractSystemInfoFromStdout(stdout: string): Record<string, unknown> | null {
   if (!stdout) return null
-  
-  // Look for lines containing system JSON
   const lines = stdout.split('\n')
   for (const line of lines) {
     const trimmed = line.trim()
     if (trimmed.startsWith('{') && (trimmed.includes('"system"') || trimmed.includes('"os"') || trimmed.includes('"provider"'))) {
       try {
         const parsed = JSON.parse(trimmed)
-        // Handle {"system":{...}} format
         if (parsed.system && typeof parsed.system === 'object') {
           return parsed.system as Record<string, unknown>
         }
-        // Handle flat format {"os":"Linux","provider":"Contabo",...}
         if (parsed.os || parsed.architecture || parsed.provider || parsed.cpu_cores) {
           return parsed as Record<string, unknown>
         }
-      } catch {
-        continue
-      }
+      } catch { continue }
     }
   }
   return null
 }
 
+// === MAIN HANDLER ===
+
 Deno.serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
@@ -103,82 +94,94 @@ Deno.serve(async (req) => {
   
   console.log('Incoming request:', req.method, pathname)
   
-  // Extract path
+  // Normalize path
   let path = pathname
   if (path.includes('/runner-api')) {
     const idx = path.indexOf('/runner-api')
     path = path.substring(idx + '/runner-api'.length)
   }
-  
-  if (!path || path === '') {
-    path = '/'
-  } else if (!path.startsWith('/')) {
-    path = '/' + path
-  }
+  if (!path || path === '') path = '/'
+  else if (!path.startsWith('/')) path = '/' + path
   
   console.log('Normalized path:', path)
 
   try {
-    // GET /health - Public health check
+    // === PUBLIC ENDPOINTS (no auth) ===
+    
+    // GET /health
     if (req.method === 'GET' && path === '/health') {
       return new Response(
         JSON.stringify({ 
           status: 'ok', 
           timestamp: new Date().toISOString(),
-          version: '2.0.0'
+          version: RUNNER_VERSION,
+          heartbeat_interval: HEARTBEAT_INTERVAL_SECONDS,
+          poll_interval: POLL_INTERVAL_SECONDS,
+          offline_threshold: RUNNER_OFFLINE_THRESHOLD_SECONDS
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // GET /install-runner.sh - Installation script
+    // GET /install-runner.sh
     if (req.method === 'GET' && path === '/install-runner.sh') {
-      const installScript = generateInstallScript()
-      return new Response(installScript, { 
-        headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'text/plain; charset=utf-8' 
-        } 
+      return new Response(generateInstallScript(), { 
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' } 
       })
     }
 
-    // GET /uninstall-runner.sh - Uninstallation script
+    // GET /uninstall-runner.sh
     if (req.method === 'GET' && path === '/uninstall-runner.sh') {
-      const uninstallScript = generateUninstallScript()
-      return new Response(uninstallScript, { 
-        headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'text/plain; charset=utf-8' 
-        } 
+      return new Response(generateUninstallScript(), { 
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' } 
       })
     }
 
-    // Initialize Supabase client with service role
+    // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
-    // POST /register - Runner registration
+    // === DASHBOARD ENDPOINTS ===
+
+    // GET /stats - Dashboard statistics
+    if (req.method === 'GET' && path === '/stats') {
+      return await handleStats(supabase)
+    }
+
+    // POST /timeout-check - Check and timeout stale orders
+    if (req.method === 'POST' && path === '/timeout-check') {
+      return await handleTimeoutCheck(supabase)
+    }
+
+    // === RUNNER AUTHENTICATED ENDPOINTS ===
+
+    // POST /register
     if (req.method === 'POST' && path === '/register') {
       return await handleRegister(req, supabase)
     }
 
-    // POST /heartbeat - Runner heartbeat
+    // POST /heartbeat
     if (req.method === 'POST' && path === '/heartbeat') {
       return await handleHeartbeat(req, supabase)
     }
 
-    // GET /orders/poll - Poll for pending orders
+    // GET /orders/poll
     if (req.method === 'GET' && path === '/orders/poll') {
       return await handleOrdersPoll(req, supabase)
     }
 
-    // POST /orders/report - Report order execution (STRICT JSON only)
+    // POST /orders/claim - Atomic claim of a single order
+    if (req.method === 'POST' && path === '/orders/claim') {
+      return await handleOrdersClaim(req, supabase)
+    }
+
+    // POST /orders/report
     if (req.method === 'POST' && path === '/orders/report') {
       return await handleOrdersReport(req, supabase)
     }
 
-    // 404 for unknown routes
+    // 404
     return new Response(
       JSON.stringify({ error: 'Not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -194,7 +197,119 @@ Deno.serve(async (req) => {
   }
 })
 
-// ============ HANDLERS ============
+// === HANDLERS ===
+
+async function handleStats(supabase: any): Promise<Response> {
+  const now = new Date()
+  const offlineThreshold = new Date(now.getTime() - RUNNER_OFFLINE_THRESHOLD_SECONDS * 1000).toISOString()
+  
+  // Count online runners (based on last_seen_at)
+  const { count: onlineRunners } = await supabase
+    .from('runners')
+    .select('id', { count: 'exact', head: true })
+    .gte('last_seen_at', offlineThreshold)
+
+  // Count total runners
+  const { count: totalRunners } = await supabase
+    .from('runners')
+    .select('id', { count: 'exact', head: true })
+
+  // Count pending orders
+  const { count: pendingOrders } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending')
+
+  // Count running orders
+  const { count: runningOrders } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'running')
+
+  // Count completed orders in last 24h
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  const { count: completedLast24h } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'completed')
+    .gte('completed_at', last24h)
+
+  // Count failed orders in last 24h
+  const { count: failedLast24h } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'failed')
+    .gte('completed_at', last24h)
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      stats: {
+        runners: {
+          online: onlineRunners || 0,
+          total: totalRunners || 0,
+          offline: (totalRunners || 0) - (onlineRunners || 0)
+        },
+        orders: {
+          pending: pendingOrders || 0,
+          running: runningOrders || 0,
+          queue: (pendingOrders || 0) + (runningOrders || 0),
+          completed_24h: completedLast24h || 0,
+          failed_24h: failedLast24h || 0
+        },
+        timestamp: now.toISOString()
+      }
+    }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleTimeoutCheck(supabase: any): Promise<Response> {
+  const now = new Date()
+  const timeoutThreshold = new Date(now.getTime() - ORDER_TIMEOUT_MINUTES * 60 * 1000).toISOString()
+  
+  // Find running orders that started more than TIMEOUT_MINUTES ago
+  const { data: staleOrders, error } = await supabase
+    .from('orders')
+    .select('id, name, runner_id, started_at')
+    .eq('status', 'running')
+    .lt('started_at', timeoutThreshold)
+
+  if (error) throw error
+
+  const timedOutIds: string[] = []
+
+  for (const order of (staleOrders || [])) {
+    // Update to failed with timeout reason
+    await supabase
+      .from('orders')
+      .update({
+        status: 'failed',
+        error_message: `Order timed out after ${ORDER_TIMEOUT_MINUTES} minutes without response`,
+        completed_at: now.toISOString()
+      })
+      .eq('id', order.id)
+
+    timedOutIds.push(order.id)
+
+    // Log the timeout
+    await supabase.from('runner_logs').insert({
+      runner_id: order.runner_id,
+      level: 'warn',
+      event_type: 'order_timeout',
+      message: `Order ${order.name} (${order.id}) timed out after ${ORDER_TIMEOUT_MINUTES} minutes`,
+    })
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      timed_out_count: timedOutIds.length,
+      timed_out_orders: timedOutIds
+    }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
 
 async function handleRegister(req: Request, supabase: any): Promise<Response> {
   const body = await req.json()
@@ -208,6 +323,7 @@ async function handleRegister(req: Request, supabase: any): Promise<Response> {
   }
 
   const tokenHash = await hashToken(token)
+  const now = new Date().toISOString()
 
   // Check if runner with same name exists
   const { data: existing } = await supabase
@@ -217,7 +333,6 @@ async function handleRegister(req: Request, supabase: any): Promise<Response> {
     .maybeSingle()
 
   if (existing) {
-    // Update existing runner
     const { data: runner, error } = await supabase
       .from('runners')
       .update({
@@ -225,7 +340,7 @@ async function handleRegister(req: Request, supabase: any): Promise<Response> {
         status: 'online',
         host_info: host_info || {},
         capabilities: capabilities || {},
-        last_seen_at: new Date().toISOString()
+        last_seen_at: now
       })
       .eq('id', existing.id)
       .select()
@@ -239,7 +354,6 @@ async function handleRegister(req: Request, supabase: any): Promise<Response> {
     )
   }
 
-  // Create new runner
   const { data: runner, error } = await supabase
     .from('runners')
     .insert({
@@ -248,7 +362,7 @@ async function handleRegister(req: Request, supabase: any): Promise<Response> {
       status: 'online',
       host_info: host_info || {},
       capabilities: capabilities || {},
-      last_seen_at: new Date().toISOString()
+      last_seen_at: now
     })
     .select()
     .single()
@@ -271,7 +385,6 @@ async function handleHeartbeat(req: Request, supabase: any): Promise<Response> {
   }
 
   const runner = await getRunnerByToken(supabase, runnerToken)
-
   if (!runner) {
     return new Response(
       JSON.stringify({ success: false, error: 'Runner not found' }),
@@ -279,11 +392,13 @@ async function handleHeartbeat(req: Request, supabase: any): Promise<Response> {
     )
   }
 
-  // Update last_seen_at and status
+  const now = new Date().toISOString()
+
+  // Update last_seen_at (status derived from this)
   const { error } = await supabase
     .from('runners')
-    .update({
-      last_seen_at: new Date().toISOString(),
+    .update({ 
+      last_seen_at: now,
       status: runner.status === 'paused' ? 'paused' : 'online'
     })
     .eq('id', runner.id)
@@ -291,7 +406,11 @@ async function handleHeartbeat(req: Request, supabase: any): Promise<Response> {
   if (error) throw error
 
   return new Response(
-    JSON.stringify({ success: true, timestamp: new Date().toISOString() }),
+    JSON.stringify({ 
+      success: true, 
+      timestamp: now,
+      next_heartbeat_in: HEARTBEAT_INTERVAL_SECONDS
+    }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
@@ -306,7 +425,6 @@ async function handleOrdersPoll(req: Request, supabase: any): Promise<Response> 
   }
 
   const runner = await getRunnerByToken(supabase, runnerToken)
-
   if (!runner) {
     return new Response(
       JSON.stringify({ success: false, error: 'Runner not found' }),
@@ -314,8 +432,8 @@ async function handleOrdersPoll(req: Request, supabase: any): Promise<Response> 
     )
   }
 
-  // Fetch pending orders for this runner
-  const { data: orders, error: ordersError } = await supabase
+  // Fetch pending orders
+  const { data: orders, error } = await supabase
     .from('orders')
     .select('id, category, name, command, description, created_at')
     .eq('runner_id', runner.id)
@@ -323,10 +441,89 @@ async function handleOrdersPoll(req: Request, supabase: any): Promise<Response> 
     .order('created_at', { ascending: true })
     .limit(10)
 
-  if (ordersError) throw ordersError
+  if (error) throw error
 
   return new Response(
     JSON.stringify({ success: true, orders: orders || [] }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleOrdersClaim(req: Request, supabase: any): Promise<Response> {
+  const runnerToken = req.headers.get('x-runner-token')
+  if (!runnerToken) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'x-runner-token header required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const runner = await getRunnerByToken(supabase, runnerToken)
+  if (!runner) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Runner not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Atomic claim: select first pending and update to running in one go
+  const now = new Date().toISOString()
+
+  // Get oldest pending order
+  const { data: pendingOrder } = await supabase
+    .from('orders')
+    .select('id, category, name, command, description')
+    .eq('runner_id', runner.id)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!pendingOrder) {
+    return new Response(
+      JSON.stringify({ success: true, order: null, message: 'No pending orders' }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Atomic update: only succeed if still pending
+  const { data: claimedOrder, error } = await supabase
+    .from('orders')
+    .update({ status: 'running', started_at: now })
+    .eq('id', pendingOrder.id)
+    .eq('status', 'pending') // Conditional - only if still pending
+    .select()
+    .maybeSingle()
+
+  if (error) throw error
+
+  if (!claimedOrder) {
+    // Another process claimed it first
+    return new Response(
+      JSON.stringify({ success: true, order: null, message: 'Order already claimed' }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Log claim
+  await supabase.from('runner_logs').insert({
+    runner_id: runner.id,
+    level: 'info',
+    event_type: 'order_claimed',
+    message: `Claimed order: ${claimedOrder.name} (${claimedOrder.id})`,
+  })
+
+  return new Response(
+    JSON.stringify({ 
+      success: true, 
+      order: {
+        id: claimedOrder.id,
+        category: claimedOrder.category,
+        name: claimedOrder.name,
+        command: claimedOrder.command,
+        description: claimedOrder.description
+      }
+    }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
@@ -340,21 +537,15 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
     )
   }
 
-  // Check Content-Type
   const contentType = req.headers.get('content-type') || ''
   if (!contentType.includes('application/json')) {
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: 'invalid_content_type', 
-        details: 'Content-Type must be application/json' 
-      }),
+      JSON.stringify({ success: false, error: 'invalid_content_type', details: 'Content-Type must be application/json' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
   const runner = await getRunnerByToken(supabase, runnerToken)
-
   if (!runner) {
     return new Response(
       JSON.stringify({ success: false, error: 'Runner not found' }),
@@ -363,21 +554,17 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
   }
 
   const rawBody = await req.text()
-
-  // Strict JSON parsing only
   let body: any
+
   try {
     body = JSON.parse(rawBody)
   } catch (parseError) {
-    // Store in runner_report_errors for debugging
     await supabase.from('runner_report_errors').insert({
       runner_id: runner.id,
       raw_body: rawBody.slice(0, 10000),
       error_type: 'invalid_json',
       error_details: parseError instanceof Error ? parseError.message : 'JSON parse failed',
     })
-
-    // Also log to runner_logs
     await supabase.from('runner_logs').insert({
       runner_id: runner.id,
       level: 'error',
@@ -386,22 +573,15 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
       raw_body: rawBody.slice(0, 5000),
       error_details: parseError instanceof Error ? parseError.message : 'JSON parse failed',
     })
-
     console.error('Invalid JSON in /orders/report:', rawBody.slice(0, 500))
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: 'invalid_json', 
-        details: 'Request body must be valid JSON' 
-      }),
+      JSON.stringify({ success: false, error: 'invalid_json', details: 'Request body must be valid JSON' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Validate required fields
   const { 
     order_id, 
-    runner_id,
     status: reportedStatus,
     started_at,
     finished_at,
@@ -413,14 +593,11 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
     meta
   } = body
 
-  // Determine which fields are missing
-  const missingFields: string[] = []
-  if (!order_id) missingFields.push('order_id')
-  if (!reportedStatus) missingFields.push('status')
-
-  const reportIncomplete = missingFields.length > 0 || exit_code === undefined
-
   if (!order_id || !reportedStatus) {
+    const missingFields = []
+    if (!order_id) missingFields.push('order_id')
+    if (!reportedStatus) missingFields.push('status')
+
     await supabase.from('runner_logs').insert({
       runner_id: runner.id,
       level: 'warn',
@@ -434,13 +611,13 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
       JSON.stringify({ 
         success: false, 
         error: 'missing_required_fields', 
-        details: `Required fields: order_id, status. Missing: ${missingFields.join(', ')}` 
+        details: `Required: order_id, status. Missing: ${missingFields.join(', ')}` 
       }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Log successful report reception
+  // Log report received
   await supabase.from('runner_logs').insert({
     runner_id: runner.id,
     level: 'info',
@@ -452,6 +629,7 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
 
   // Determine final status using exit_code as source of truth
   const finalStatus = determineOrderStatus(exit_code ?? null, reportedStatus)
+  const reportIncomplete = exit_code === undefined
 
   // Build update object
   const updateData: Record<string, unknown> = {
@@ -459,7 +637,6 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
     report_incomplete: reportIncomplete,
   }
 
-  // Handle timestamps
   if (reportedStatus === 'running' || started_at) {
     updateData.started_at = started_at || new Date().toISOString()
   }
@@ -468,35 +645,18 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
     updateData.completed_at = finished_at || new Date().toISOString()
   }
 
-  // Store exit_code
-  if (exit_code !== undefined) {
-    updateData.exit_code = exit_code
-  }
-
-  // Store output tails
-  if (stdout_tail) {
-    updateData.stdout_tail = String(stdout_tail).slice(0, 10000)
-  }
-  if (stderr_tail) {
-    updateData.stderr_tail = String(stderr_tail).slice(0, 10000)
-  }
-
-  // Store result
-  if (result !== undefined) {
-    updateData.result = result || {}
-  }
-
-  // Store error message (prioritize stderr_tail if error_message not provided)
+  if (exit_code !== undefined) updateData.exit_code = exit_code
+  if (stdout_tail) updateData.stdout_tail = String(stdout_tail).slice(0, 10000)
+  if (stderr_tail) updateData.stderr_tail = String(stderr_tail).slice(0, 10000)
+  if (result !== undefined) updateData.result = result || {}
+  
   if (error_message) {
     updateData.error_message = error_message
   } else if (finalStatus === 'failed' && stderr_tail) {
     updateData.error_message = String(stderr_tail).slice(0, 1000)
   }
 
-  // Store meta (playbook, version, etc.)
-  if (meta) {
-    updateData.meta = meta
-  }
+  if (meta) updateData.meta = meta
 
   // Update order
   const { error: updateError } = await supabase
@@ -510,135 +670,9 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
     throw updateError
   }
 
-  // Auto-update infrastructure capabilities on successful order
+  // Auto-update infrastructure capabilities on completion
   if (finalStatus === 'completed') {
-    const { data: order } = await supabase
-      .from('orders')
-      .select('infrastructure_id, category, description')
-      .eq('id', order_id)
-      .single()
-
-    if (order?.infrastructure_id) {
-      // Get current infrastructure capabilities
-      const { data: infra } = await supabase
-        .from('infrastructures')
-        .select('capabilities')
-        .eq('id', order.infrastructure_id)
-        .single()
-
-      const currentCapabilities = (infra?.capabilities || {}) as Record<string, string>
-      let updatedCapabilities = { ...currentCapabilities }
-      const infraUpdate: Record<string, unknown> = {}
-
-      // 1. If result contains explicit capabilities, merge them
-      if (result?.capabilities && typeof result.capabilities === 'object') {
-        updatedCapabilities = { ...updatedCapabilities, ...result.capabilities }
-      }
-      
-      // 1b. Also try to extract capabilities from stdout_tail if result is empty
-      // Playbooks often print JSON like: {"capabilities":{"docker.installed":"installed"}}
-      const orderWithOutput = await supabase
-        .from('orders')
-        .select('stdout_tail')
-        .eq('id', order_id)
-        .single()
-      
-      if (orderWithOutput.data?.stdout_tail) {
-        const stdoutCapabilities = extractCapabilitiesFromStdout(orderWithOutput.data.stdout_tail)
-        if (stdoutCapabilities) {
-          updatedCapabilities = { ...updatedCapabilities, ...stdoutCapabilities }
-          console.log('Extracted capabilities from stdout:', stdoutCapabilities)
-        }
-        
-        // Also extract system info from stdout if present
-        const systemInfo = extractSystemInfoFromStdout(orderWithOutput.data.stdout_tail)
-        if (systemInfo) {
-          if (systemInfo.os) infraUpdate.os = systemInfo.os
-          if (systemInfo.architecture) infraUpdate.architecture = systemInfo.architecture
-          if (systemInfo.distribution) infraUpdate.distribution = systemInfo.distribution
-          if (systemInfo.cpu_cores) infraUpdate.cpu_cores = systemInfo.cpu_cores
-          if (systemInfo.ram_gb) infraUpdate.ram_gb = systemInfo.ram_gb
-          if (systemInfo.disk_gb) infraUpdate.disk_gb = systemInfo.disk_gb
-          if (systemInfo.provider) updatedCapabilities['provider'] = String(systemInfo.provider)
-          console.log('Extracted system info from stdout:', systemInfo)
-        }
-      }
-
-      // 2. Extract playbook ID from description and mark its verifies as installed
-      // Description format: "[playbook.id] description text"
-      const playbookMatch = order.description?.match(/^\[([a-z0-9_.]+)\]/)
-      if (playbookMatch) {
-        const playbookId = playbookMatch[1]
-        // Playbook verifies mapping (server-side copy of what the playbook verifies)
-        const PLAYBOOK_VERIFIES: Record<string, string[]> = {
-          'system.info': ['system.detected'],
-          'system.update': ['system.updated'],
-          'system.packages.base': ['curl.installed', 'wget.installed', 'git.installed', 'jq.installed'],
-          'system.timezone.set': ['timezone.configured'],
-          'system.swap.ensure': ['swap.configured'],
-          'net.dns.check': ['dns.working'],
-          'firewall.ufw.baseline': ['firewall.configured'],
-          'ssh.hardening': ['ssh.hardened'],
-          'fail2ban.install': ['fail2ban.installed'],
-          'runtime.node.install_lts': ['node.installed', 'npm.installed'],
-          'runtime.node.verify': ['node.verified'],
-          'runtime.python.install': ['python.installed'],
-          'runtime.pm2.install': ['pm2.installed'],
-          'docker.install_engine': ['docker.installed'],
-          'docker.install_compose': ['docker.compose.installed'],
-          'docker.postinstall': ['docker.usermod'],
-          'docker.verify': ['docker.verified'],
-          'proxy.caddy.install': ['caddy.installed'],
-          'proxy.caddy.verify': ['caddy.verified'],
-          'proxy.nginx.install': ['nginx.installed'],
-          'tls.acme.precheck': ['acme.ready'],
-          'monitor.prometheus.install': ['prometheus.installed'],
-          'monitor.node_exporter.install': ['node_exporter.installed'],
-          'monitor.grafana.install': ['grafana.installed'],
-          'supabase.precheck': ['supabase.prerequisites_ok'],
-          'supabase.install_cli': ['supabase.cli_installed'],
-          'supabase.selfhost.up': ['supabase.running'],
-          'supabase.selfhost.healthcheck': ['supabase.healthy'],
-          'maintenance.cleanup': ['cleanup.done'],
-          'maintenance.logs.rotate': ['logs.rotated'],
-        }
-
-        const verifies = PLAYBOOK_VERIFIES[playbookId]
-        if (verifies) {
-          for (const cap of verifies) {
-            updatedCapabilities[cap] = 'installed'
-          }
-          console.log(`Playbook ${playbookId} completed: marked ${verifies.join(', ')} as installed`)
-        }
-      }
-
-      // 3. If detection category with system info, update infrastructure specs
-      if (result?.system) {
-        if (result.system.os) infraUpdate.os = result.system.os
-        if (result.system.architecture) infraUpdate.architecture = result.system.architecture
-        if (result.system.distribution) infraUpdate.distribution = result.system.distribution
-        if (result.system.cpu_cores) infraUpdate.cpu_cores = result.system.cpu_cores
-        if (result.system.ram_mb) infraUpdate.ram_gb = Math.round(result.system.ram_mb / 1024)
-        if (result.system.disk_gb) infraUpdate.disk_gb = result.system.disk_gb
-      }
-
-      // Apply capabilities update
-      infraUpdate.capabilities = updatedCapabilities
-
-      await supabase
-        .from('infrastructures')
-        .update(infraUpdate)
-        .eq('id', order.infrastructure_id)
-
-      // Log capability update
-      await supabase.from('runner_logs').insert({
-        runner_id: runner.id,
-        level: 'info',
-        event_type: 'capabilities_updated',
-        message: `Infrastructure capabilities updated after order ${order_id}`,
-        parsed_data: { updated_capabilities: updatedCapabilities },
-      })
-    }
+    await updateInfrastructureCapabilities(supabase, runner, order_id, result, stdout_tail)
   }
 
   return new Response(
@@ -647,17 +681,131 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
   )
 }
 
-// ============ SCRIPT GENERATORS ============
+// === CAPABILITY UPDATE HELPER ===
+
+async function updateInfrastructureCapabilities(
+  supabase: any,
+  runner: any,
+  orderId: string,
+  result: any,
+  stdoutTail: string
+) {
+  const { data: order } = await supabase
+    .from('orders')
+    .select('infrastructure_id, category, description, stdout_tail')
+    .eq('id', orderId)
+    .single()
+
+  if (!order?.infrastructure_id) return
+
+  const { data: infra } = await supabase
+    .from('infrastructures')
+    .select('capabilities')
+    .eq('id', order.infrastructure_id)
+    .single()
+
+  const currentCapabilities = (infra?.capabilities || {}) as Record<string, string>
+  let updatedCapabilities = { ...currentCapabilities }
+  const infraUpdate: Record<string, unknown> = {}
+
+  // 1. Merge explicit capabilities from result
+  if (result?.capabilities && typeof result.capabilities === 'object') {
+    updatedCapabilities = { ...updatedCapabilities, ...result.capabilities }
+  }
+  
+  // 2. Extract from stdout_tail
+  const stdout = order.stdout_tail || stdoutTail
+  if (stdout) {
+    const stdoutCapabilities = extractCapabilitiesFromStdout(stdout)
+    if (stdoutCapabilities) {
+      updatedCapabilities = { ...updatedCapabilities, ...stdoutCapabilities }
+      console.log('Extracted capabilities from stdout:', stdoutCapabilities)
+    }
+    
+    const systemInfo = extractSystemInfoFromStdout(stdout)
+    if (systemInfo) {
+      if (systemInfo.os) infraUpdate.os = systemInfo.os
+      if (systemInfo.architecture) infraUpdate.architecture = systemInfo.architecture
+      if (systemInfo.distribution) infraUpdate.distribution = systemInfo.distribution
+      if (systemInfo.cpu_cores) infraUpdate.cpu_cores = systemInfo.cpu_cores
+      if (systemInfo.ram_gb) infraUpdate.ram_gb = systemInfo.ram_gb
+      if (systemInfo.disk_gb) infraUpdate.disk_gb = systemInfo.disk_gb
+      if (systemInfo.provider) updatedCapabilities['provider'] = String(systemInfo.provider)
+      console.log('Extracted system info from stdout:', systemInfo)
+    }
+  }
+
+  // 3. Extract playbook ID and mark verifies as installed
+  const playbookMatch = order.description?.match(/^\[([a-z0-9_.]+)\]/)
+  if (playbookMatch) {
+    const playbookId = playbookMatch[1]
+    const PLAYBOOK_VERIFIES: Record<string, string[]> = {
+      'system.info': ['system.detected'],
+      'system.update': ['system.updated'],
+      'system.packages.base': ['curl.installed', 'wget.installed', 'git.installed', 'jq.installed'],
+      'essentials.detect': ['essentials.detected'],
+      'essentials.tools': ['curl.installed', 'wget.installed', 'git.installed', 'jq.installed'],
+      'docker.detect': ['docker.detected'],
+      'docker.install_engine': ['docker.installed'],
+      'docker.install_compose': ['docker.compose.installed'],
+      'docker.verify': ['docker.verified'],
+      'runtime.node.detect': ['node.detected'],
+      'runtime.node.install_lts': ['node.installed', 'npm.installed'],
+      'runtime.node.verify': ['node.verified'],
+      'proxy.caddy.install': ['caddy.installed'],
+      'proxy.caddy.verify': ['caddy.verified'],
+      'supabase.precheck': ['supabase.prerequisites_ok'],
+      'supabase.selfhost.up': ['supabase.running'],
+      'supabase.selfhost.healthcheck': ['supabase.installed'],
+      'supabase.selfhost.install_full': ['supabase.installed'],
+    }
+
+    const verifies = PLAYBOOK_VERIFIES[playbookId]
+    if (verifies) {
+      for (const cap of verifies) {
+        updatedCapabilities[cap] = 'installed'
+      }
+      console.log(`Playbook ${playbookId} completed: marked ${verifies.join(', ')} as installed`)
+    }
+  }
+
+  // 4. System info from result
+  if (result?.system) {
+    if (result.system.os) infraUpdate.os = result.system.os
+    if (result.system.architecture) infraUpdate.architecture = result.system.architecture
+    if (result.system.distribution) infraUpdate.distribution = result.system.distribution
+    if (result.system.cpu_cores) infraUpdate.cpu_cores = result.system.cpu_cores
+    if (result.system.ram_mb) infraUpdate.ram_gb = Math.round(result.system.ram_mb / 1024)
+    if (result.system.disk_gb) infraUpdate.disk_gb = result.system.disk_gb
+  }
+
+  infraUpdate.capabilities = updatedCapabilities
+
+  await supabase
+    .from('infrastructures')
+    .update(infraUpdate)
+    .eq('id', order.infrastructure_id)
+
+  await supabase.from('runner_logs').insert({
+    runner_id: runner.id,
+    level: 'info',
+    event_type: 'capabilities_updated',
+    message: `Infrastructure capabilities updated after order ${orderId}`,
+    parsed_data: { updated_capabilities: updatedCapabilities },
+  })
+}
+
+// === SCRIPT GENERATORS ===
 
 function generateInstallScript(): string {
   return `#!/bin/bash
 set -e
 
-# Colors for output
+# Colors
 RED='\\033[0;31m'
 GREEN='\\033[0;32m'
 YELLOW='\\033[1;33m'
-NC='\\033[0m' # No Color
+NC='\\033[0m'
 
 # Parse arguments
 TOKEN=""
@@ -665,18 +813,9 @@ API_URL=""
 
 while [[ \$# -gt 0 ]]; do
   case \$1 in
-    --token)
-      TOKEN="\$2"
-      shift 2
-      ;;
-    --api-url)
-      API_URL="\$2"
-      shift 2
-      ;;
-    *)
-      echo -e "\${RED}Unknown option: \$1\${NC}"
-      exit 1
-      ;;
+    --token) TOKEN="\$2"; shift 2 ;;
+    --api-url) API_URL="\$2"; shift 2 ;;
+    *) echo -e "\${RED}Unknown option: \$1\${NC}"; exit 1 ;;
   esac
 done
 
@@ -685,11 +824,10 @@ if [ -z "\$TOKEN" ] || [ -z "\$API_URL" ]; then
   exit 1
 fi
 
-echo -e "\${GREEN}=== Ikoma Runner Installation v2.0 ===\${NC}"
+echo -e "\${GREEN}=== Ikoma Runner Installation v${RUNNER_VERSION} ===\${NC}"
 echo "API URL: \$API_URL"
 echo ""
 
-# Get hostname for runner name
 RUNNER_NAME=\$(hostname)
 
 # Collect host info
@@ -707,7 +845,6 @@ EOF
 
 echo "Registering runner '\$RUNNER_NAME'..."
 
-# Register with the API
 RESPONSE=\$(curl -s -X POST "\$API_URL/register" \\
   -H "Content-Type: application/json" \\
   -d "{
@@ -720,10 +857,8 @@ RESPONSE=\$(curl -s -X POST "\$API_URL/register" \\
 echo "Response: \$RESPONSE"
 
 if echo "\$RESPONSE" | grep -q '"success":true'; then
-  echo ""
   echo -e "\${GREEN}✓ Runner registered successfully!\${NC}"
 else
-  echo ""
   echo -e "\${RED}✗ Registration failed\${NC}"
   exit 1
 fi
@@ -732,28 +867,26 @@ fi
 if ! command -v jq &> /dev/null; then
   echo -e "\${YELLOW}Installing jq...\${NC}"
   apt-get update -qq && apt-get install -y -qq jq 2>/dev/null || yum install -y -q jq 2>/dev/null || apk add -q jq 2>/dev/null || {
-    echo -e "\${RED}Failed to install jq. Please install it manually.\${NC}"
+    echo -e "\${RED}Failed to install jq.\${NC}"
     exit 1
   }
 fi
 
-# Create systemd service
-echo ""
 echo -e "\${YELLOW}Creating systemd service...\${NC}"
 
 INSTALL_DIR="/opt/ikoma-runner"
 mkdir -p \$INSTALL_DIR
 
-# Create main runner script (v2 with proper JSON reporting)
+# Create runner script v2.1
 cat > \$INSTALL_DIR/runner.sh << 'RUNNER_SCRIPT_EOF'
 #!/bin/bash
 API_URL="\$1"
 TOKEN="\$2"
-HEARTBEAT_INTERVAL=\${3:-30}
-POLL_INTERVAL=\${4:-5}
+HEARTBEAT_INTERVAL=\${3:-${HEARTBEAT_INTERVAL_SECONDS}}
+POLL_INTERVAL=\${4:-${POLL_INTERVAL_SECONDS}}
 
 LAST_HEARTBEAT=0
-RUNNER_VERSION="2.0.0"
+RUNNER_VERSION="${RUNNER_VERSION}"
 
 log() {
   echo "\$(date '+%Y-%m-%d %H:%M:%S'): \$1"
@@ -763,7 +896,7 @@ send_heartbeat() {
   RESPONSE=\$(curl -s -X POST "\$API_URL/heartbeat" \\
     -H "x-runner-token: \$TOKEN" \\
     -H "Content-Type: application/json" \\
-    -d "{\"version\": \"\$RUNNER_VERSION\", \"seen_at\": \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" 2>&1)
+    -d "{\"version\": \"\$RUNNER_VERSION\"}" 2>&1)
   if echo "\$RESPONSE" | grep -q '"success":true'; then
     log "Heartbeat OK"
   else
@@ -771,7 +904,6 @@ send_heartbeat() {
   fi
 }
 
-# Send report with proper JSON format (v2 contract)
 send_report() {
   local ORDER_ID="\$1"
   local STATUS="\$2"
@@ -782,41 +914,33 @@ send_report() {
   local FINISHED_AT="\$7"
   local RESULT="\$8"
   
-  # Escape strings for JSON
   local ESCAPED_STDOUT=\$(echo "\$STDOUT_TAIL" | jq -Rs . 2>/dev/null || echo '""')
   local ESCAPED_STDERR=\$(echo "\$STDERR_TAIL" | jq -Rs . 2>/dev/null || echo '""')
   
-  # Build JSON payload
   local PAYLOAD
   if [ -n "\$RESULT" ]; then
-    PAYLOAD=\$(cat <<PAYLOAD_EOF
-{
-  "order_id": "\$ORDER_ID",
-  "status": "\$STATUS",
-  "exit_code": \$EXIT_CODE,
-  "stdout_tail": \$ESCAPED_STDOUT,
-  "stderr_tail": \$ESCAPED_STDERR,
-  "started_at": "\$STARTED_AT",
-  "finished_at": "\$FINISHED_AT",
-  "result": \$RESULT,
-  "meta": {"runner_version": "\$RUNNER_VERSION"}
-}
-PAYLOAD_EOF
-)
+    PAYLOAD="{
+  \\"order_id\\": \\"\$ORDER_ID\\",
+  \\"status\\": \\"\$STATUS\\",
+  \\"exit_code\\": \$EXIT_CODE,
+  \\"stdout_tail\\": \$ESCAPED_STDOUT,
+  \\"stderr_tail\\": \$ESCAPED_STDERR,
+  \\"started_at\\": \\"\$STARTED_AT\\",
+  \\"finished_at\\": \\"\$FINISHED_AT\\",
+  \\"result\\": \$RESULT,
+  \\"meta\\": {\\"runner_version\\": \\"\$RUNNER_VERSION\\"}
+}"
   else
-    PAYLOAD=\$(cat <<PAYLOAD_EOF
-{
-  "order_id": "\$ORDER_ID",
-  "status": "\$STATUS",
-  "exit_code": \$EXIT_CODE,
-  "stdout_tail": \$ESCAPED_STDOUT,
-  "stderr_tail": \$ESCAPED_STDERR,
-  "started_at": "\$STARTED_AT",
-  "finished_at": "\$FINISHED_AT",
-  "meta": {"runner_version": "\$RUNNER_VERSION"}
-}
-PAYLOAD_EOF
-)
+    PAYLOAD="{
+  \\"order_id\\": \\"\$ORDER_ID\\",
+  \\"status\\": \\"\$STATUS\\",
+  \\"exit_code\\": \$EXIT_CODE,
+  \\"stdout_tail\\": \$ESCAPED_STDOUT,
+  \\"stderr_tail\\": \$ESCAPED_STDERR,
+  \\"started_at\\": \\"\$STARTED_AT\\",
+  \\"finished_at\\": \\"\$FINISHED_AT\\",
+  \\"meta\\": {\\"runner_version\\": \\"\$RUNNER_VERSION\\"}
+}"
   fi
   
   curl -s -X POST "\$API_URL/orders/report" \\
@@ -841,16 +965,12 @@ poll_orders() {
       ORDER_ID=\$(echo "\$ORDERS" | jq -r ".orders[\$i].id")
       ORDER_NAME=\$(echo "\$ORDERS" | jq -r ".orders[\$i].name")
       ORDER_CMD=\$(echo "\$ORDERS" | jq -r ".orders[\$i].command")
-      ORDER_CATEGORY=\$(echo "\$ORDERS" | jq -r ".orders[\$i].category")
       
       log "Executing order: \$ORDER_NAME (\$ORDER_ID)"
       
       STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      
-      # Report running status
       send_report "\$ORDER_ID" "running" "null" "" "" "\$STARTED_AT" "null" ""
       
-      # Execute command and capture output
       STDOUT_FILE=\$(mktemp)
       STDERR_FILE=\$(mktemp)
       
@@ -860,25 +980,19 @@ poll_orders() {
       set -e
       
       FINISHED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      
-      # Read outputs (last 10KB)
       STDOUT_TAIL=\$(tail -c 10000 "\$STDOUT_FILE" 2>/dev/null || echo "")
       STDERR_TAIL=\$(tail -c 10000 "\$STDERR_FILE" 2>/dev/null || echo "")
       
-      # Determine status based on exit code (source of truth)
       if [ "\$EXIT_CODE" -eq 0 ]; then
         STATUS="applied"
-        log "Order completed successfully (exit_code=0)"
+        log "Order completed (exit_code=0)"
         
-        # Try to extract structured JSON result from stdout for ALL order categories
-        # Look for lines containing valid JSON objects (capabilities, system info, etc.)
+        # Extract JSON result from stdout
         RESULT=""
-        
-        # Try to find a JSON line that contains capabilities or system info
         JSON_LINE=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
         if [ -n "\$JSON_LINE" ] && echo "\$JSON_LINE" | jq . >/dev/null 2>&1; then
           RESULT="\$JSON_LINE"
-          log "Extracted JSON result from stdout"
+          log "Extracted JSON result"
         fi
         
         if [ -n "\$RESULT" ]; then
@@ -888,7 +1002,7 @@ poll_orders() {
         fi
       else
         STATUS="failed"
-        log "Order failed with exit_code=\$EXIT_CODE"
+        log "Order failed (exit_code=\$EXIT_CODE)"
         send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
       fi
       
@@ -899,50 +1013,44 @@ poll_orders() {
 
 log "Starting Ikoma Runner v\$RUNNER_VERSION"
 log "API URL: \$API_URL"
-log "Heartbeat interval: \${HEARTBEAT_INTERVAL}s, Poll interval: \${POLL_INTERVAL}s"
+log "Heartbeat: \${HEARTBEAT_INTERVAL}s, Poll: \${POLL_INTERVAL}s"
 
-# Initial heartbeat
 send_heartbeat
 
 while true; do
   CURRENT_TIME=\$(date +%s)
   
-  # Send heartbeat every HEARTBEAT_INTERVAL seconds
   if [ \$((CURRENT_TIME - LAST_HEARTBEAT)) -ge \$HEARTBEAT_INTERVAL ]; then
     send_heartbeat
     LAST_HEARTBEAT=\$CURRENT_TIME
   fi
   
-  # Poll for orders
   poll_orders
-  
   sleep \$POLL_INTERVAL
 done
 RUNNER_SCRIPT_EOF
 
 chmod +x \$INSTALL_DIR/runner.sh
 
-# Save configuration
 cat > \$INSTALL_DIR/config << CONFIG_EOF
 API_URL="\$API_URL"
 TOKEN="\$TOKEN"
-HEARTBEAT_INTERVAL=30
-POLL_INTERVAL=5
-VERSION="2.0.0"
+HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL_SECONDS}
+POLL_INTERVAL=${POLL_INTERVAL_SECONDS}
+VERSION="${RUNNER_VERSION}"
 CONFIG_EOF
 
 chmod 600 \$INSTALL_DIR/config
 
-# Create systemd service file
 cat > /etc/systemd/system/ikoma-runner.service << SERVICE_EOF
 [Unit]
-Description=Ikoma Runner Service v2.0
+Description=Ikoma Runner Service v${RUNNER_VERSION}
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash \$INSTALL_DIR/runner.sh "\$API_URL" "\$TOKEN" 30 5
+ExecStart=/bin/bash \$INSTALL_DIR/runner.sh "\$API_URL" "\$TOKEN" ${HEARTBEAT_INTERVAL_SECONDS} ${POLL_INTERVAL_SECONDS}
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -952,7 +1060,6 @@ StandardError=journal
 WantedBy=multi-user.target
 SERVICE_EOF
 
-# Reload systemd and enable service
 systemctl daemon-reload
 systemctl enable ikoma-runner.service
 systemctl start ikoma-runner.service
@@ -960,11 +1067,9 @@ systemctl start ikoma-runner.service
 echo ""
 echo -e "\${GREEN}✓ Systemd service installed and started!\${NC}"
 echo ""
-echo "Useful commands:"
-echo "  systemctl status ikoma-runner    - Check service status"
-echo "  journalctl -u ikoma-runner -f    - View logs"
-echo "  systemctl restart ikoma-runner   - Restart service"
-echo "  systemctl stop ikoma-runner      - Stop service"
+echo "Commands:"
+echo "  systemctl status ikoma-runner"
+echo "  journalctl -u ikoma-runner -f"
 echo ""
 echo -e "\${GREEN}Installation complete!\${NC}"
 `
@@ -974,11 +1079,10 @@ function generateUninstallScript(): string {
   return `#!/bin/bash
 set -e
 
-# Colors for output
 RED='\\033[0;31m'
 GREEN='\\033[0;32m'
 YELLOW='\\033[1;33m'
-NC='\\033[0m' # No Color
+NC='\\033[0m'
 
 echo -e "\${YELLOW}=== Ikoma Runner Uninstallation ===\${NC}"
 echo ""
@@ -986,33 +1090,30 @@ echo ""
 INSTALL_DIR="/opt/ikoma-runner"
 SERVICE_NAME="ikoma-runner"
 
-# Stop and disable the service
 if systemctl is-active --quiet \$SERVICE_NAME 2>/dev/null; then
-  echo "Stopping \$SERVICE_NAME service..."
+  echo "Stopping \$SERVICE_NAME..."
   systemctl stop \$SERVICE_NAME
 fi
 
 if systemctl is-enabled --quiet \$SERVICE_NAME 2>/dev/null; then
-  echo "Disabling \$SERVICE_NAME service..."
+  echo "Disabling \$SERVICE_NAME..."
   systemctl disable \$SERVICE_NAME
 fi
 
-# Remove service file
 if [ -f "/etc/systemd/system/\$SERVICE_NAME.service" ]; then
-  echo "Removing systemd service file..."
+  echo "Removing service file..."
   rm -f /etc/systemd/system/\$SERVICE_NAME.service
   systemctl daemon-reload
 fi
 
-# Remove installation directory
 if [ -d "\$INSTALL_DIR" ]; then
   echo "Removing installation directory..."
   rm -rf \$INSTALL_DIR
 fi
 
 echo ""
-echo -e "\${GREEN}✓ Ikoma Runner uninstalled successfully!\${NC}"
+echo -e "\${GREEN}✓ Ikoma Runner uninstalled!\${NC}"
 echo ""
-echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manually.\${NC}"
+echo -e "\${YELLOW}Note: Delete the runner entry in the dashboard manually.\${NC}"
 `
 }
