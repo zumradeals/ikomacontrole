@@ -501,7 +501,7 @@ EOF
     id: 'runtime.node.install_lts',
     group: 'runtime',
     name: 'Installer Node.js LTS',
-    description: 'Installe Node.js LTS via NodeSource (multi-distro)',
+    description: 'Installe Node.js LTS via NodeSource avec gestion apt-lock',
     level: 'simple',
     risk: 'low',
     duration: '~3min',
@@ -513,11 +513,29 @@ EOF
     command: `#!/bin/bash
 set -e
 
+# Function to wait for apt lock
+wait_for_apt() {
+  local max_wait=300
+  local wait_time=0
+  echo "Checking for apt lock..."
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+    if [ \$wait_time -ge \$max_wait ]; then
+      echo "✗ Timeout waiting for apt lock after \${max_wait}s"
+      exit 1
+    fi
+    echo "Waiting for apt lock... (\${wait_time}s)"
+    sleep 5
+    wait_time=\$((wait_time + 5))
+  done
+  echo "✓ apt is available"
+}
+
 # Check if already installed
 if command -v node &>/dev/null; then
-  NODE_VERSION=$(node -v)
-  echo "Node.js already installed: $NODE_VERSION"
+  NODE_VERSION=\$(node -v)
+  echo "Node.js already installed: \$NODE_VERSION"
   echo "Use 'runtime.node.update' to upgrade"
+  echo '{"capabilities":{"node.installed":"installed","npm.installed":"installed"}}'
   exit 0
 fi
 
@@ -525,9 +543,18 @@ echo "Installing Node.js LTS..."
 
 # Detect distro and install
 if command -v apt-get &>/dev/null; then
+  export DEBIAN_FRONTEND=noninteractive
+  
+  # Wait for apt lock
+  wait_for_apt
+  
   # Ubuntu/Debian - use NodeSource
+  echo "Adding NodeSource repository..."
   curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+  
+  wait_for_apt
   apt-get install -y nodejs
+  
 elif command -v dnf &>/dev/null; then
   # Fedora/RHEL 8+
   curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -
@@ -548,14 +575,14 @@ fi
 echo ""
 echo "=== Verification ==="
 if command -v node &>/dev/null; then
-  echo "✓ Node.js: $(node -v)"
+  echo "✓ Node.js: \$(node -v)"
 else
   echo "✗ Node.js installation FAILED"
   exit 1
 fi
 
 if command -v npm &>/dev/null; then
-  echo "✓ NPM: $(npm -v)"
+  echo "✓ NPM: \$(npm -v)"
 else
   echo "✗ NPM installation FAILED"
   exit 1
@@ -563,6 +590,7 @@ fi
 
 echo ""
 echo "✓ Node.js LTS installed successfully"
+echo '{"capabilities":{"node.installed":"installed","npm.installed":"installed"}}'
 `,
   },
   {
@@ -1975,6 +2003,208 @@ if [ "\$FAILED" -eq 0 ]; then
 else
   echo "⚠ Supabase partially running: \$RUNNING OK, \$FAILED failed"
   echo "Run 'docker compose logs' to debug"
+  echo '{"capabilities":{"supabase.installed":"not_installed"}}'
+  exit 1
+fi
+`,
+  },
+  {
+    id: 'supabase.selfhost.install_full',
+    group: 'supabase',
+    name: 'Installation complète Supabase',
+    description: 'Installe Supabase self-hosted (script officiel tout-en-un)',
+    level: 'simple',
+    risk: 'medium',
+    duration: '~10-20min',
+    icon: Database,
+    prerequisites: [
+      { capability: 'docker.installed', label: 'Docker', required: true },
+      { capability: 'docker.compose.installed', label: 'Docker Compose', required: true }
+    ],
+    verifies: ['supabase.installed'],
+    command: `#!/bin/bash
+set -e
+
+# Configuration
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME"
+NETWORK_MODE="\${SUPABASE_NETWORK_MODE:-local}"
+DOMAIN="\${SUPABASE_DOMAIN:-}"
+
+echo "╔════════════════════════════════════════════════════════════╗"
+echo "║       IKOMA - Supabase Self-Hosted Full Installation       ║"
+echo "╚════════════════════════════════════════════════════════════╝"
+echo ""
+echo "Instance: \$INSTANCE_NAME"
+echo "Mode: \$NETWORK_MODE"
+[ -n "\$DOMAIN" ] && echo "Domain: \$DOMAIN"
+echo ""
+
+# Step 1: Prerequisites check
+echo "=== Step 1/6: Checking prerequisites ==="
+
+if ! command -v docker &>/dev/null || ! docker info &>/dev/null; then
+  echo "✗ Docker not available"
+  exit 1
+fi
+echo "✓ Docker is available"
+
+if ! docker compose version &>/dev/null 2>&1; then
+  echo "✗ Docker Compose not available"
+  exit 1
+fi
+echo "✓ Docker Compose is available"
+
+if ! command -v git &>/dev/null; then
+  echo "✗ Git not installed"
+  exit 1
+fi
+echo "✓ Git is available"
+
+RAM_MB=\$(free -m | awk '/^Mem:/{print \$2}')
+if [ "\$RAM_MB" -lt 2048 ]; then
+  echo "✗ Insufficient RAM (\${RAM_MB}MB < 2GB minimum)"
+  exit 1
+fi
+echo "✓ RAM: \${RAM_MB}MB"
+
+echo ""
+echo "=== Step 2/6: Downloading Supabase stack ==="
+
+mkdir -p "\$(dirname \$INSTALL_DIR)"
+
+if [ -d "\$INSTALL_DIR/docker" ]; then
+  echo "Stack already exists, updating..."
+  cd "\$INSTALL_DIR"
+  git fetch origin master --depth=1 2>/dev/null || true
+  git reset --hard origin/master 2>/dev/null || true
+else
+  echo "Cloning Supabase repository..."
+  git clone --depth 1 --filter=blob:none --sparse https://github.com/supabase/supabase.git "\$INSTALL_DIR"
+  cd "\$INSTALL_DIR"
+  git sparse-checkout set docker
+fi
+echo "✓ Stack downloaded"
+
+echo ""
+echo "=== Step 3/6: Generating secrets ==="
+
+cd "\$INSTALL_DIR/docker"
+
+# Generate secure secrets
+generate_secret() {
+  openssl rand -base64 32 | tr -d '\\n/+=' | head -c 32
+}
+
+generate_jwt_secret() {
+  openssl rand -base64 64 | tr -d '\\n/+=' | head -c 64
+}
+
+if [ -f .env.example ]; then
+  cp .env.example .env
+  echo "✓ Copied .env.example as base"
+else
+  echo "✗ .env.example not found!"
+  exit 1
+fi
+
+JWT_SECRET=\$(generate_jwt_secret)
+ANON_KEY=\$(generate_secret)
+SERVICE_ROLE_KEY=\$(generate_secret)
+POSTGRES_PASSWORD=\$(generate_secret)
+DASHBOARD_PASSWORD=\$(generate_secret)
+SECRET_KEY_BASE=\$(generate_jwt_secret)
+VAULT_ENC_KEY=\$(generate_secret)
+PG_META_CRYPTO_KEY=\$(generate_secret)
+LOGFLARE_API_KEY=\$(generate_secret)
+
+# Determine site URL
+if [ "\$NETWORK_MODE" = "public" ] && [ -n "\$DOMAIN" ]; then
+  SITE_URL="https://\$DOMAIN"
+  API_EXTERNAL_URL="https://\$DOMAIN"
+else
+  SITE_URL="http://localhost:3000"
+  API_EXTERNAL_URL="http://localhost:8000"
+fi
+
+# Update secrets in .env file
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=\$POSTGRES_PASSWORD|" .env
+sed -i "s|^JWT_SECRET=.*|JWT_SECRET=\$JWT_SECRET|" .env
+sed -i "s|^ANON_KEY=.*|ANON_KEY=\$ANON_KEY|" .env
+sed -i "s|^SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=\$SERVICE_ROLE_KEY|" .env
+sed -i "s|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=\$DASHBOARD_PASSWORD|" .env
+sed -i "s|^SITE_URL=.*|SITE_URL=\$SITE_URL|" .env
+sed -i "s|^API_EXTERNAL_URL=.*|API_EXTERNAL_URL=\$API_EXTERNAL_URL|" .env
+sed -i "s|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=\$API_EXTERNAL_URL|" .env
+
+# Add missing variables
+grep -q "^SECRET_KEY_BASE=" .env || echo "SECRET_KEY_BASE=\$SECRET_KEY_BASE" >> .env
+grep -q "^VAULT_ENC_KEY=" .env || echo "VAULT_ENC_KEY=\$VAULT_ENC_KEY" >> .env
+grep -q "^PG_META_CRYPTO_KEY=" .env || echo "PG_META_CRYPTO_KEY=\$PG_META_CRYPTO_KEY" >> .env
+grep -q "^LOGFLARE_API_KEY=" .env || echo "LOGFLARE_API_KEY=\$LOGFLARE_API_KEY" >> .env
+grep -q "^LOGFLARE_PUBLIC_ACCESS_TOKEN=" .env || echo "LOGFLARE_PUBLIC_ACCESS_TOKEN=\$LOGFLARE_API_KEY" >> .env
+grep -q "^LOGFLARE_PRIVATE_ACCESS_TOKEN=" .env || echo "LOGFLARE_PRIVATE_ACCESS_TOKEN=\$LOGFLARE_API_KEY" >> .env
+grep -q "^JWT_EXPIRY=" .env || echo "JWT_EXPIRY=3600" >> .env
+grep -q "^PGRST_DB_SCHEMAS=" .env || echo "PGRST_DB_SCHEMAS=public,storage,graphql_public" >> .env
+grep -q "^IMGPROXY_ENABLE_WEBP_DETECTION=" .env || echo "IMGPROXY_ENABLE_WEBP_DETECTION=true" >> .env
+grep -q "^FUNCTIONS_VERIFY_JWT=" .env || echo "FUNCTIONS_VERIFY_JWT=false" >> .env
+grep -q "^DOCKER_SOCKET_LOCATION=" .env || echo "DOCKER_SOCKET_LOCATION=/var/run/docker.sock" >> .env
+grep -q "^POOLER_DEFAULT_POOL_SIZE=" .env || echo "POOLER_DEFAULT_POOL_SIZE=20" >> .env
+grep -q "^POOLER_MAX_CLIENT_CONN=" .env || echo "POOLER_MAX_CLIENT_CONN=100" >> .env
+grep -q "^POOLER_DB_POOL_SIZE=" .env || echo "POOLER_DB_POOL_SIZE=20" >> .env
+grep -q "^POOLER_TENANT_ID=" .env || echo "POOLER_TENANT_ID=\$INSTANCE_NAME" >> .env
+grep -q "^POOLER_PROXY_PORT_TRANSACTION=" .env || echo "POOLER_PROXY_PORT_TRANSACTION=6543" >> .env
+
+echo "✓ Secrets generated and configured"
+
+echo ""
+echo "=== Step 4/6: Pulling Docker images ==="
+docker compose pull
+
+echo ""
+echo "=== Step 5/6: Starting Supabase stack ==="
+docker compose up -d
+
+echo ""
+echo "Waiting for services to stabilize (60s)..."
+sleep 60
+
+echo ""
+echo "=== Step 6/6: Health check ==="
+
+RUNNING=0
+FAILED=0
+
+for SERVICE in supabase-db supabase-kong supabase-auth supabase-rest supabase-realtime supabase-storage supabase-studio; do
+  if docker compose ps 2>/dev/null | grep -q "\$SERVICE.*Up"; then
+    echo "  ✓ \$SERVICE: running"
+    RUNNING=\$((RUNNING + 1))
+  else
+    echo "  ✗ \$SERVICE: not running"
+    FAILED=\$((FAILED + 1))
+  fi
+done
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════╗"
+if [ "\$FAILED" -eq 0 ]; then
+  echo "║  ✓ SUPABASE INSTALLED SUCCESSFULLY!                        ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  echo ""
+  echo "Access URLs:"
+  echo "  Dashboard: http://localhost:3000 (or https://\$DOMAIN if public)"
+  echo "  API:       http://localhost:8000 (or https://\$DOMAIN if public)"
+  echo ""
+  echo "Credentials (save these!):"
+  echo "  Dashboard user: supabase"
+  echo "  Dashboard pass: \$DASHBOARD_PASSWORD"
+  echo ""
+  echo '{"capabilities":{"supabase.installed":"installed","supabase.stack.downloaded":"installed","supabase.env.configured":"installed","supabase.containers.started":"installed"}}'
+else
+  echo "║  ⚠ INSTALLATION PARTIAL: \$RUNNING OK, \$FAILED failed       ║"
+  echo "╚════════════════════════════════════════════════════════════╝"
+  echo ""
+  echo "Debug with: docker compose logs"
   echo '{"capabilities":{"supabase.installed":"not_installed"}}'
   exit 1
 fi

@@ -50,9 +50,10 @@ export function TestOrderButton({ runnerId, runnerName, disabled }: TestOrderBut
       return data;
     },
     enabled: !!testOrderId,
-    refetchInterval: (data) => {
+    refetchInterval: (query) => {
       // Stop polling once complete
-      if (data?.status === 'completed' || data?.status === 'failed') {
+      const status = query.state.data?.status;
+      if (status === 'completed' || status === 'failed') {
         return false;
       }
       return 1000; // Poll every second
