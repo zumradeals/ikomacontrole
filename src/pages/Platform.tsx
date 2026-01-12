@@ -124,7 +124,7 @@ const Platform = () => {
   // Navigate to Supabase Setup page
   const handleSupabaseSetup = (service: PlatformService) => {
     if (service.id === 'supabase' && selectedInfraId) {
-      navigate(`/supabase-setup?infraId=${selectedInfraId}`);
+      navigate(`/platform/supabase?infraId=${selectedInfraId}`);
     }
   };
 
