@@ -432,6 +432,187 @@ export function generateDeploymentSteps(deployment: CreateDeploymentInput): Omit
   return steps;
 }
 
+// Generate rollback steps for a deployment
+export function generateRollbackSteps(
+  deployment: Deployment, 
+  previousDeployment: Deployment
+): Omit<DeploymentStep, 'id' | 'deployment_id' | 'order_id' | 'created_at' | 'updated_at'>[] {
+  const workingDir = `/opt/ikoma/apps/${deployment.app_name}`;
+  const backupDir = `/opt/ikoma/apps/.rollback/${deployment.app_name}`;
+  const steps: Omit<DeploymentStep, 'id' | 'deployment_id' | 'order_id' | 'created_at' | 'updated_at'>[] = [];
+  let order = 1;
+
+  // Stop current app
+  switch (deployment.deploy_type) {
+    case 'nodejs':
+      steps.push({
+        step_order: order++,
+        step_type: 'stop',
+        step_name: 'Stop Current Application',
+        command: `pkill -f "node.*${deployment.app_name}" || true; sleep 2`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      break;
+    case 'docker_compose':
+      steps.push({
+        step_order: order++,
+        step_type: 'stop',
+        step_name: 'Stop Docker Compose',
+        command: `cd ${workingDir} && docker compose down || true`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      break;
+  }
+
+  // Backup current version
+  steps.push({
+    step_order: order++,
+    step_type: 'rollback',
+    step_name: 'Backup Current Version',
+    command: `mkdir -p ${backupDir} && rm -rf ${backupDir}/failed && mv ${workingDir} ${backupDir}/failed 2>/dev/null || true`,
+    status: 'pending',
+    started_at: null, finished_at: null, error_message: null,
+    stdout_tail: null, stderr_tail: null, exit_code: null,
+  });
+
+  // Restore previous version
+  steps.push({
+    step_order: order++,
+    step_type: 'clone_repo',
+    step_name: 'Restore Previous Version',
+    command: `rm -rf ${workingDir} && git clone --depth 1 --branch ${previousDeployment.branch} ${previousDeployment.repo_url} ${workingDir}`,
+    status: 'pending',
+    started_at: null, finished_at: null, error_message: null,
+    stdout_tail: null, stderr_tail: null, exit_code: null,
+  });
+
+  // Checkout previous branch
+  steps.push({
+    step_order: order++,
+    step_type: 'checkout',
+    step_name: 'Checkout Previous Branch',
+    command: `cd ${workingDir} && git checkout ${previousDeployment.branch}`,
+    status: 'pending',
+    started_at: null, finished_at: null, error_message: null,
+    stdout_tail: null, stderr_tail: null, exit_code: null,
+  });
+
+  // Write previous env vars if any
+  const prevEnvVars = previousDeployment.env_vars || {};
+  if (Object.keys(prevEnvVars).length > 0) {
+    const envContent = Object.entries(prevEnvVars)
+      .map(([k, v]) => `${k}="${v}"`)
+      .join('\n');
+    steps.push({
+      step_order: order++,
+      step_type: 'env_write',
+      step_name: 'Restore Environment Variables',
+      command: `cat > ${workingDir}/.env << 'ENVEOF'\n${envContent}\nENVEOF`,
+      status: 'pending',
+      started_at: null, finished_at: null, error_message: null,
+      stdout_tail: null, stderr_tail: null, exit_code: null,
+    });
+  }
+
+  // Type-specific restore steps
+  const port = previousDeployment.port || 3000;
+  switch (previousDeployment.deploy_type) {
+    case 'nodejs':
+      steps.push({
+        step_order: order++,
+        step_type: 'install_deps',
+        step_name: 'Restore Dependencies',
+        command: `cd ${workingDir} && npm ci --production 2>/dev/null || npm install --production`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      steps.push({
+        step_order: order++,
+        step_type: 'build',
+        step_name: 'Rebuild Application',
+        command: `cd ${workingDir} && if grep -q '"build"' package.json; then npm run build; else echo "No build script"; fi`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      const startCmd = previousDeployment.start_command || 'npm start';
+      steps.push({
+        step_order: order++,
+        step_type: 'start',
+        step_name: 'Start Previous Version',
+        command: `cd ${workingDir} && PORT=${port} nohup ${startCmd} > /var/log/${deployment.app_name}.log 2>&1 &`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      break;
+    case 'docker_compose':
+      steps.push({
+        step_order: order++,
+        step_type: 'start',
+        step_name: 'Restart Docker Compose',
+        command: `cd ${workingDir} && docker compose pull && docker compose up -d`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      break;
+    case 'static_site':
+      steps.push({
+        step_order: order++,
+        step_type: 'start',
+        step_name: 'Restore Static Files',
+        command: `cp -r ${workingDir}/* /var/www/${deployment.app_name}/`,
+        status: 'pending',
+        started_at: null, finished_at: null, error_message: null,
+        stdout_tail: null, stderr_tail: null, exit_code: null,
+      });
+      break;
+  }
+
+  // Healthcheck
+  let healthcheckCmd = '';
+  const hcType = previousDeployment.healthcheck_type || 'http';
+  switch (hcType) {
+    case 'http':
+      healthcheckCmd = `sleep 5 && for i in 1 2 3 4 5; do curl -sf http://localhost:${port}${previousDeployment.healthcheck_value || '/'} && exit 0; sleep 3; done; exit 1`;
+      break;
+    case 'tcp':
+      healthcheckCmd = `sleep 5 && for i in 1 2 3 4 5; do nc -z localhost ${port} && exit 0; sleep 3; done; exit 1`;
+      break;
+    case 'command':
+      healthcheckCmd = previousDeployment.healthcheck_value || 'exit 0';
+      break;
+  }
+  steps.push({
+    step_order: order++,
+    step_type: 'healthcheck',
+    step_name: 'Verify Rollback',
+    command: healthcheckCmd,
+    status: 'pending',
+    started_at: null, finished_at: null, error_message: null,
+    stdout_tail: null, stderr_tail: null, exit_code: null,
+  });
+
+  // Finalize rollback
+  steps.push({
+    step_order: order++,
+    step_type: 'finalize',
+    step_name: 'Finalize Rollback',
+    command: `echo '{"status":"rolled_back","app":"${deployment.app_name}","restored_from":"${previousDeployment.id}"}'`,
+    status: 'pending',
+    started_at: null, finished_at: null, error_message: null,
+    stdout_tail: null, stderr_tail: null, exit_code: null,
+  });
+
+  return steps;
+}
+
 // Create deployment steps
 export function useCreateDeploymentSteps() {
   const queryClient = useQueryClient();
@@ -457,5 +638,97 @@ export function useCreateDeploymentSteps() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['deployment-steps', variables.deploymentId] });
     },
+  });
+}
+
+// Create rollback deployment
+export function useCreateRollbackDeployment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ fromDeployment, toDeployment }: { 
+      fromDeployment: Deployment; 
+      toDeployment: Deployment; 
+    }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Create new rollback deployment
+      const { data: rollbackDeployment, error: deployError } = await supabase
+        .from('deployments')
+        .insert({
+          app_name: fromDeployment.app_name,
+          repo_url: toDeployment.repo_url,
+          branch: toDeployment.branch,
+          deploy_type: toDeployment.deploy_type,
+          runner_id: fromDeployment.runner_id,
+          infrastructure_id: fromDeployment.infrastructure_id,
+          healthcheck_type: toDeployment.healthcheck_type,
+          healthcheck_value: toDeployment.healthcheck_value,
+          port: toDeployment.port,
+          start_command: toDeployment.start_command,
+          env_vars: toDeployment.env_vars,
+          expose_via_caddy: toDeployment.expose_via_caddy,
+          domain: toDeployment.domain,
+          status: 'ready',
+          rolled_back_from: fromDeployment.id,
+          created_by: user?.id,
+        })
+        .select()
+        .single();
+
+      if (deployError) throw deployError;
+
+      // Generate rollback steps
+      const steps = generateRollbackSteps(fromDeployment, toDeployment);
+      
+      // Create steps
+      const stepsToInsert = steps.map(step => ({
+        ...step,
+        deployment_id: rollbackDeployment.id,
+      }));
+
+      const { error: stepsError } = await supabase
+        .from('deployment_steps')
+        .insert(stepsToInsert);
+
+      if (stepsError) throw stepsError;
+
+      return rollbackDeployment as Deployment;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      toast.success('Rollback préparé');
+    },
+    onError: (error: Error) => {
+      toast.error(`Erreur rollback: ${error.message}`);
+    },
+  });
+}
+
+// Fetch previous successful deployment for an app
+export function usePreviousDeployment(appName: string | null, excludeId?: string) {
+  return useQuery({
+    queryKey: ['previous-deployment', appName, excludeId],
+    queryFn: async () => {
+      if (!appName) return null;
+      
+      let query = supabase
+        .from('deployments')
+        .select('*')
+        .eq('app_name', appName)
+        .eq('status', 'applied')
+        .order('completed_at', { ascending: false })
+        .limit(1);
+      
+      if (excludeId) {
+        query = query.neq('id', excludeId);
+      }
+
+      const { data, error } = await query.maybeSingle();
+
+      if (error) throw error;
+      return data as Deployment | null;
+    },
+    enabled: !!appName,
   });
 }
