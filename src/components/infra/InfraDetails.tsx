@@ -36,7 +36,7 @@ import {
 } from '@/components/ui/select';
 import { Infrastructure, useAssociateRunner } from '@/hooks/useInfrastructures';
 import { useSettings } from '@/hooks/useSettings';
-import { SystemOrdersDialog } from './SystemOrdersDialog';
+import { PlaybookCatalog } from './PlaybookCatalog';
 import { AutoDetectDialog } from './AutoDetectDialog';
 import { OrdersHistory } from './OrdersHistory';
 import { CustomOrderDialog } from './CustomOrderDialog';
@@ -210,7 +210,7 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
             className="shrink-0"
           >
             <Terminal className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Ordres système</span>
+            <span className="hidden sm:inline">Playbooks</span>
           </Button>
           <Button 
             variant="outline" 
@@ -504,13 +504,14 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
         </div>
       </div>
 
-      {/* System Orders Dialog */}
+      {/* Playbook Catalog */}
       {associatedRunners.length > 0 && (
-        <SystemOrdersDialog
+        <PlaybookCatalog
           open={ordersDialogOpen}
           onOpenChange={setOrdersDialogOpen}
           runner={associatedRunners[0]}
           infrastructureId={infrastructure.id}
+          capabilities={infrastructure.capabilities as Record<string, unknown>}
         />
       )}
 
