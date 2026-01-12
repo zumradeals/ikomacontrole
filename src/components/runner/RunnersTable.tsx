@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2, Building2, Play } from 'lucide-react';
+import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2, Building2 } from 'lucide-react';
 import { TestOrderButton } from './TestOrderButton';
+import { RunnerDiagnostics } from './RunnerDiagnostics';
 import { useRunners, useDeleteRunner } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 import {
@@ -219,6 +220,7 @@ export function RunnersTable() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
+                    <RunnerDiagnostics runner={runner} />
                     <TestOrderButton 
                       runnerId={runner.id} 
                       runnerName={runner.name}
