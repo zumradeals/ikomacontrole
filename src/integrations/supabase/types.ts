@@ -14,6 +14,68 @@ export type Database = {
   }
   public: {
     Tables: {
+      caddy_routes: {
+        Row: {
+          backend_host: string
+          backend_port: number
+          backend_protocol: string
+          consumed_by: string | null
+          created_at: string
+          created_by: string | null
+          domain: string
+          full_domain: string | null
+          https_enabled: boolean
+          https_status: string
+          id: string
+          infrastructure_id: string
+          notes: string | null
+          subdomain: string | null
+          updated_at: string
+        }
+        Insert: {
+          backend_host?: string
+          backend_port?: number
+          backend_protocol?: string
+          consumed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          domain: string
+          full_domain?: string | null
+          https_enabled?: boolean
+          https_status?: string
+          id?: string
+          infrastructure_id: string
+          notes?: string | null
+          subdomain?: string | null
+          updated_at?: string
+        }
+        Update: {
+          backend_host?: string
+          backend_port?: number
+          backend_protocol?: string
+          consumed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          domain?: string
+          full_domain?: string | null
+          https_enabled?: boolean
+          https_status?: string
+          id?: string
+          infrastructure_id?: string
+          notes?: string | null
+          subdomain?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "caddy_routes_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deployment_steps: {
         Row: {
           command: string
@@ -206,6 +268,8 @@ export type Database = {
           notes: string | null
           os: string | null
           ram_gb: number | null
+          root_domain: string | null
+          root_domain_verified: boolean | null
           type: Database["public"]["Enums"]["infra_type"]
           updated_at: string
         }
@@ -222,6 +286,8 @@ export type Database = {
           notes?: string | null
           os?: string | null
           ram_gb?: number | null
+          root_domain?: string | null
+          root_domain_verified?: boolean | null
           type?: Database["public"]["Enums"]["infra_type"]
           updated_at?: string
         }
@@ -238,6 +304,8 @@ export type Database = {
           notes?: string | null
           os?: string | null
           ram_gb?: number | null
+          root_domain?: string | null
+          root_domain_verified?: boolean | null
           type?: Database["public"]["Enums"]["infra_type"]
           updated_at?: string
         }
