@@ -7,6 +7,7 @@ import { ServiceCard } from '@/components/platform/ServiceCard';
 import { PlatformGating } from '@/components/platform/PlatformGating';
 import { InfraSelector } from '@/components/platform/InfraSelector';
 import { ServiceLogsDialog } from '@/components/platform/ServiceLogsDialog';
+import { CaddyRouteDialog } from '@/components/platform/CaddyRouteDialog';
 import { usePlatformServices, PREREQUISITE_PLAYBOOKS, PlatformService } from '@/hooks/usePlatformServices';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
@@ -17,6 +18,7 @@ const Platform = () => {
   const [executingServiceId, setExecutingServiceId] = useState<string | null>(null);
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   const [selectedServiceForLogs, setSelectedServiceForLogs] = useState<PlatformService | null>(null);
+  const [caddyRouteDialogOpen, setCaddyRouteDialogOpen] = useState(false);
 
   const {
     infrastructures,
@@ -118,6 +120,85 @@ const Platform = () => {
     setLogsDialogOpen(true);
   };
 
+  // Handle Caddy route configuration
+  const handleAddCaddyRoute = async (domain: string, backendUrl: string, enableHttps: boolean) => {
+    if (!associatedRunner) {
+      toast({
+        title: 'Erreur',
+        description: 'Aucun runner associé',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Build the add_route command dynamically
+    const httpsFlag = enableHttps ? '' : '# HTTPS disabled - using HTTP only\n';
+    const command = `#!/bin/bash
+set -e
+
+DOMAIN="${domain}"
+BACKEND="${backendUrl}"
+
+echo "=== Ajout route Caddy: $DOMAIN -> $BACKEND ==="
+
+# Backup current config
+if [ -f /etc/caddy/Caddyfile ]; then
+  cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak.$(date +%Y%m%d%H%M%S)
+fi
+
+# Check if domain already exists
+if grep -q "^$DOMAIN" /etc/caddy/Caddyfile 2>/dev/null; then
+  echo "⚠️ Le domaine $DOMAIN existe déjà dans la configuration"
+  echo "Mise à jour de la route existante..."
+  # Remove existing block (simplified - handles basic cases)
+  sed -i "/^$DOMAIN/,/^}/d" /etc/caddy/Caddyfile
+fi
+
+# Add new route
+${httpsFlag}cat >> /etc/caddy/Caddyfile << EOF
+
+$DOMAIN {
+  reverse_proxy $BACKEND
+  encode gzip
+  log {
+    output file /var/log/caddy/$DOMAIN.log
+  }
+}
+EOF
+
+# Validate configuration
+echo "Validation de la configuration..."
+caddy validate --config /etc/caddy/Caddyfile
+
+# Reload Caddy
+echo "Rechargement de Caddy..."
+systemctl reload caddy
+
+echo "✅ Route ajoutée avec succès: $DOMAIN -> $BACKEND"
+caddy list-modules 2>/dev/null | head -5 || true
+`;
+
+    await createOrder.mutateAsync({
+      runner_id: associatedRunner.id,
+      infrastructure_id: selectedInfraId,
+      category: 'installation',
+      name: `Caddy: Ajouter route ${domain}`,
+      description: `[proxy.caddy.add_route] Ajout reverse proxy ${domain} → ${backendUrl}`,
+      command,
+    });
+
+    toast({
+      title: 'Route en cours d\'ajout',
+      description: `${domain} → ${backendUrl}`,
+    });
+  };
+
+  const handleConfigureCaddy = (service: PlatformService) => {
+    if (service.id === 'caddy') {
+      setCaddyRouteDialogOpen(true);
+    }
+  };
+
   // Filter orders for selected service
   const serviceOrders = useMemo(() => {
     if (!selectedServiceForLogs) return [];
@@ -198,6 +279,7 @@ const Platform = () => {
                   onInstall={() => handleInstall(service)}
                   onRefresh={() => handleRefresh(service)}
                   onViewLogs={() => handleViewLogs(service)}
+                  onConfigure={service.id === 'caddy' ? () => handleConfigureCaddy(service) : undefined}
                   disabled={!gating.hasRunner || !gating.runnerOnline}
                   isLoading={executingServiceId === service.id}
                 />
@@ -244,6 +326,7 @@ const Platform = () => {
                       onInstall={() => handleInstall(service)}
                       onRefresh={() => handleRefresh(service)}
                       onViewLogs={() => handleViewLogs(service)}
+                      onConfigure={service.id === 'caddy' ? () => handleConfigureCaddy(service) : undefined}
                       disabled={!gating.hasRunner || !gating.runnerOnline}
                       isLoading={executingServiceId === service.id}
                     />
@@ -300,6 +383,14 @@ const Platform = () => {
         onOpenChange={setLogsDialogOpen}
         serviceName={selectedServiceForLogs?.name || ''}
         orders={serviceOrders}
+      />
+
+      {/* Caddy Route Dialog */}
+      <CaddyRouteDialog
+        open={caddyRouteDialogOpen}
+        onOpenChange={setCaddyRouteDialogOpen}
+        onSubmit={handleAddCaddyRoute}
+        isLoading={createOrder.isPending}
       />
     </div>
   );

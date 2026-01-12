@@ -9,7 +9,8 @@ import {
   AlertTriangle,
   Loader2,
   Clock,
-  Settings
+  Settings,
+  Route
 } from 'lucide-react';
 import { PlatformService, ServiceStatus } from '@/hooks/usePlatformServices';
 
@@ -19,6 +20,7 @@ interface ServiceCardProps {
   onInstall?: () => void;
   onViewLogs?: () => void;
   onRefresh?: () => void;
+  onConfigure?: () => void;
   disabled?: boolean;
   isLoading?: boolean;
 }
@@ -71,6 +73,7 @@ export function ServiceCard({
   onInstall,
   onViewLogs,
   onRefresh,
+  onConfigure,
   disabled = false,
   isLoading = false,
 }: ServiceCardProps) {
@@ -151,6 +154,12 @@ export function ServiceCard({
 
         {service.status === 'installed' && (
           <>
+            {onConfigure && (
+              <Button size="sm" variant="default" onClick={onConfigure} disabled={disabled}>
+                <Route className="w-3 h-3 mr-1.5" />
+                Routes
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={onRefresh} disabled={disabled}>
               <RefreshCw className="w-3 h-3 mr-1.5" />
               Status
