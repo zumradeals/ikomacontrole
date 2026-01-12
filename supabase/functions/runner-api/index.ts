@@ -137,6 +137,13 @@ Deno.serve(async (req) => {
       })
     }
 
+    // GET /playbooks/supabase-installer - Returns the official Supabase installation script
+    if (req.method === 'GET' && path === '/playbooks/supabase-installer') {
+      return new Response(generateSupabaseInstallerScript(), { 
+        headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' } 
+      })
+    }
+
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -1115,5 +1122,143 @@ echo ""
 echo -e "\${GREEN}✓ Ikoma Runner uninstalled!\${NC}"
 echo ""
 echo -e "\${YELLOW}Note: Delete the runner entry in the dashboard manually.\${NC}"
+`
+}
+
+// === SUPABASE INSTALLER SCRIPT ===
+
+function generateSupabaseInstallerScript(): string {
+  return `#!/bin/bash
+# Supabase Self-Hosted Production Installer v3.21 - Complete Edition
+# Served by Ikoma Runner API
+set -euo pipefail
+
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m'
+
+wait_for_apt_lock() {
+    local first_message=true
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+       if [ "$first_message" = true ]; then
+           echo -e "\${YELLOW}⏳ Waiting for apt locks...\${NC}"
+           first_message=false
+       fi
+       sleep 5
+    done
+}
+
+cat << 'HEADER'
+   ███████╗██╗   ██╗██████╗  █████╗ ██████╗  █████╗ ███████╗███████╗
+   ██╔════╝██║   ██║██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔════╝
+   ███████╗██║   ██║██████╔╝███████║██████╔╝███████║███████╗█████╗  
+   ╚════██║██║   ██║██╔═══╝ ██╔══██║██╔══██╗██╔══██║╚════██║██╔══╝  
+   ███████║╚██████╔╝██║     ██║  ██║██████╔╝██║  ██║███████║███████╗
+   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝
+HEADER
+
+echo -e "\${GREEN}Self-Hosted Installer v3.21\${NC}"
+echo ""
+
+DOMAIN="\\\${SUPABASE_DOMAIN:-}"
+EMAIL="\\\${SUPABASE_EMAIL:-admin@localhost}"
+
+if [ -z "\$DOMAIN" ]; then
+    echo -e "\${RED}ERROR: SUPABASE_DOMAIN environment variable required\${NC}"
+    exit 1
+fi
+
+echo -e "\${GREEN}Domain: \$DOMAIN\${NC}"
+
+if [ "\$EUID" -ne 0 ]; then 
+  echo -e "\${RED}Run as root\${NC}"
+  exit 1
+fi
+
+echo -e "\${GREEN}🔐 Generating credentials...\${NC}"
+POSTGRES_PASSWORD=\$(openssl rand -hex 32)
+JWT_SECRET=\$(openssl rand -hex 32)
+DASHBOARD_PASSWORD=\$(openssl rand -hex 16)
+SECRET_KEY_BASE=\$(openssl rand -hex 32)
+VAULT_ENC_KEY=\$(openssl rand -hex 16)
+
+wait_for_apt_lock
+apt-get update -qq
+
+if ! command -v docker &> /dev/null; then
+    echo -e "\${YELLOW}Installing Docker...\${NC}"
+    wait_for_apt_lock
+    apt-get install -y docker.io -qq
+fi
+
+if ! docker compose version &> /dev/null 2>&1; then
+   echo -e "\${YELLOW}Installing Docker Compose v2...\${NC}"
+   COMPOSE_VERSION=\$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep tag_name | cut -d '"' -f 4 || echo "v2.20.0")
+   mkdir -p /usr/local/lib/docker/cli-plugins/
+   curl -SL "https://github.com/docker/compose/releases/download/\\\${COMPOSE_VERSION}/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
+   chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+fi
+
+for pkg in git wget curl jq; do
+    dpkg -l | grep -q "^ii  \$pkg " || { wait_for_apt_lock; apt-get install -y \$pkg -qq; }
+done
+
+echo -e "\${GREEN}📥 Cloning Supabase...\${NC}"
+cd /opt
+rm -rf supabase-project supabase
+git clone --depth 1 https://github.com/supabase/supabase.git
+mkdir -p supabase-project
+cp -r supabase/docker/* supabase-project/
+cp supabase/docker/.env.example supabase-project/.env
+cd supabase-project
+
+sed -i '/^name:/d' docker-compose.yml 2>/dev/null || true
+sed -i 's/: true/: "true"/g' docker-compose.yml
+sed -i 's/: false/: "false"/g' docker-compose.yml
+
+generate_jwt() {
+    local role=\$1
+    local exp=\$(((\$(date +%s) + 10 * 365 * 24 * 60 * 60)))
+    local header=\$(echo -n '{"alg":"HS256","typ":"JWT"}' | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    local payload=\$(echo -n "{\\"role\\":\\"\$role\\",\\"iss\\":\\"supabase\\",\\"iat\\":\$(date +%s),\\"exp\\":\$exp}" | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    local signature=\$(echo -n "\$header.\$payload" | openssl dgst -sha256 -hmac "\$JWT_SECRET" -binary | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    echo "\$header.\$payload.\$signature"
+}
+
+ANON_KEY=\$(generate_jwt "anon")
+SERVICE_ROLE_KEY=\$(generate_jwt "service_role")
+
+echo -e "\${GREEN}🔧 Configuring...\${NC}"
+sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=\$POSTGRES_PASSWORD|" .env
+sed -i "s|JWT_SECRET=.*|JWT_SECRET=\$JWT_SECRET|" .env
+sed -i "s|ANON_KEY=.*|ANON_KEY=\$ANON_KEY|" .env
+sed -i "s|SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=\$SERVICE_ROLE_KEY|" .env
+sed -i "s|DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=\$DASHBOARD_PASSWORD|" .env
+sed -i "s|SITE_URL=.*|SITE_URL=https://\$DOMAIN|" .env
+sed -i "s|API_EXTERNAL_URL=.*|API_EXTERNAL_URL=https://\$DOMAIN|" .env
+
+grep -q "SECRET_KEY_BASE" .env || echo "SECRET_KEY_BASE=\$SECRET_KEY_BASE" >> .env
+grep -q "VAULT_ENC_KEY" .env || echo "VAULT_ENC_KEY=\$VAULT_ENC_KEY" >> .env
+
+echo -e "\${GREEN}📥 Pulling images...\${NC}"
+docker compose pull --quiet
+
+echo -e "\${GREEN}🚀 Starting Supabase...\${NC}"
+docker compose up -d
+
+echo -e "\${GREEN}⏳ Waiting for services...\${NC}"
+sleep 30
+
+echo ""
+echo -e "\${GREEN}🎉 Supabase Installation Complete!\${NC}"
+echo ""
+echo "Dashboard: https://\$DOMAIN"
+echo "Postgres Password: \$POSTGRES_PASSWORD"
+echo "Dashboard Password: \$DASHBOARD_PASSWORD"
+echo "Anon Key: \$ANON_KEY"
+echo "Service Role Key: \$SERVICE_ROLE_KEY"
+echo ""
+echo '{"capabilities":{"supabase":"installed","supabase_selfhosted":"installed"}}'
 `
 }

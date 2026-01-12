@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2, Building2 } from 'lucide-react';
+import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2, Building2, Play } from 'lucide-react';
+import { TestOrderButton } from './TestOrderButton';
 import { useRunners, useDeleteRunner } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 import {
@@ -113,7 +114,7 @@ export function RunnersTable() {
             <TableHead>Système</TableHead>
             <TableHead>Ressources</TableHead>
             <TableHead>Dernière activité</TableHead>
-            <TableHead className="w-[50px]"></TableHead>
+            <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -217,19 +218,26 @@ export function RunnersTable() {
                   }
                 </TableCell>
                 <TableCell>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => setRunnerToDelete({ id: runner.id, name: runner.name })}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Supprimer le runner</TooltipContent>
-                  </Tooltip>
+                  <div className="flex items-center gap-1">
+                    <TestOrderButton 
+                      runnerId={runner.id} 
+                      runnerName={runner.name}
+                      disabled={runner.status !== 'online'}
+                    />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => setRunnerToDelete({ id: runner.id, name: runner.name })}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Supprimer le runner</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </TableCell>
               </TableRow>
             );
