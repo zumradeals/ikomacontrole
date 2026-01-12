@@ -112,8 +112,8 @@ const SERVICE_DEFINITIONS = [
     },
     playbooks: {
       precheck: 'supabase.precheck',
-      install: ['supabase.selfhost.pull'],
-      status: 'supabase.precheck',
+      install: ['supabase.selfhost.pull_stack', 'supabase.selfhost.configure_env', 'supabase.selfhost.up', 'supabase.selfhost.healthcheck'],
+      status: 'supabase.selfhost.healthcheck',
     },
     prerequisites: ['docker.installed', 'docker.compose.installed', 'git.installed'],
   },

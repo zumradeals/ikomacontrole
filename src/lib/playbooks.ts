@@ -1590,58 +1590,91 @@ const SUPABASE_PLAYBOOKS: Playbook[] = [
     id: 'supabase.precheck',
     group: 'supabase',
     name: 'Vérifier prérequis Supabase',
-    description: 'Vérifie Docker, Compose, ressources avant installation',
+    description: 'Vérifie Docker, Compose, ports, disque, RAM, runner online',
     level: 'simple',
     risk: 'low',
     duration: '~10s',
     icon: Database,
     prerequisites: [],
-    verifies: [],
+    verifies: ['supabase.precheck.passed'],
     command: `#!/bin/bash
 echo "=== Supabase Self-Hosted Prerequisites Check ==="
 echo ""
 
 ERRORS=0
+WARNINGS=0
 
 # Check Docker
 if command -v docker &>/dev/null && docker info &>/dev/null; then
-  echo "✓ Docker: \$(docker --version)"
+  DOCKER_VERSION=\$(docker --version | awk '{print \$3}' | tr -d ',')
+  echo "✓ Docker: \$DOCKER_VERSION"
 else
-  echo "✗ Docker: NOT AVAILABLE"
+  echo "✗ Docker: NOT AVAILABLE or daemon not running"
   ERRORS=\$((ERRORS + 1))
 fi
 
-# Check Docker Compose
+# Check Docker Compose (v2 plugin preferred)
 if docker compose version &>/dev/null 2>&1; then
-  echo "✓ Docker Compose: \$(docker compose version 2>/dev/null | head -1)"
+  COMPOSE_VERSION=\$(docker compose version 2>/dev/null | awk '{print \$NF}')
+  echo "✓ Docker Compose: \$COMPOSE_VERSION (plugin)"
 elif command -v docker-compose &>/dev/null; then
-  echo "✓ Docker Compose: \$(docker-compose --version)"
+  COMPOSE_VERSION=\$(docker-compose --version | awk '{print \$3}' | tr -d ',')
+  echo "✓ Docker Compose: \$COMPOSE_VERSION (standalone)"
 else
   echo "✗ Docker Compose: NOT AVAILABLE"
   ERRORS=\$((ERRORS + 1))
 fi
 
-# Check RAM (minimum 4GB recommended)
+# Check Git
+if command -v git &>/dev/null; then
+  echo "✓ Git: \$(git --version | awk '{print \$3}')"
+else
+  echo "✗ Git: NOT INSTALLED"
+  ERRORS=\$((ERRORS + 1))
+fi
+
+# Check RAM (minimum 4GB recommended, 2GB absolute minimum)
 RAM_MB=\$(free -m | awk '/^Mem:/{print \$2}')
 if [ "\$RAM_MB" -ge 4096 ]; then
   echo "✓ RAM: \${RAM_MB}MB (>= 4GB recommended)"
+elif [ "\$RAM_MB" -ge 2048 ]; then
+  echo "⚠ RAM: \${RAM_MB}MB (2-4GB, may have performance issues)"
+  WARNINGS=\$((WARNINGS + 1))
 else
-  echo "⚠ RAM: \${RAM_MB}MB (< 4GB, may have issues)"
+  echo "✗ RAM: \${RAM_MB}MB (< 2GB minimum required)"
+  ERRORS=\$((ERRORS + 1))
 fi
 
-# Check Disk (minimum 20GB)
+# Check Disk (minimum 20GB free)
 DISK_GB=\$(df -BG / | awk 'NR==2{gsub("G",""); print \$4}')
 if [ "\$DISK_GB" -ge 20 ]; then
   echo "✓ Free Disk: \${DISK_GB}GB (>= 20GB recommended)"
+elif [ "\$DISK_GB" -ge 10 ]; then
+  echo "⚠ Free Disk: \${DISK_GB}GB (10-20GB, may be insufficient for images)"
+  WARNINGS=\$((WARNINGS + 1))
 else
-  echo "⚠ Free Disk: \${DISK_GB}GB (< 20GB, may be insufficient)"
+  echo "✗ Free Disk: \${DISK_GB}GB (< 10GB minimum required)"
+  ERRORS=\$((ERRORS + 1))
 fi
 
-# Check ports
+# Check critical ports
 echo ""
-echo "Port availability:"
-for PORT in 3000 5432 8000 8443 9000; do
-  if ss -tlnp | grep -q ":\$PORT "; then
+echo "Port availability (required):"
+REQUIRED_PORTS="5432 8000"
+for PORT in \$REQUIRED_PORTS; do
+  if ss -tlnp 2>/dev/null | grep -q ":\$PORT " || netstat -tlnp 2>/dev/null | grep -q ":\$PORT "; then
+    echo "  ✗ Port \$PORT: IN USE (required by Supabase)"
+    ERRORS=\$((ERRORS + 1))
+  else
+    echo "  ✓ Port \$PORT: Available"
+  fi
+done
+
+echo ""
+echo "Optional ports:"
+OPTIONAL_PORTS="3000 8443 9000 54321 54322"
+for PORT in \$OPTIONAL_PORTS; do
+  if ss -tlnp 2>/dev/null | grep -q ":\$PORT " || netstat -tlnp 2>/dev/null | grep -q ":\$PORT "; then
     echo "  ⚠ Port \$PORT: IN USE"
   else
     echo "  ✓ Port \$PORT: Available"
@@ -1649,55 +1682,25 @@ for PORT in 3000 5432 8000 8443 9000; do
 done
 
 echo ""
+echo "=== Summary ==="
 if [ "\$ERRORS" -gt 0 ]; then
-  echo "✗ Prerequisites NOT met (\$ERRORS issues)"
+  echo "✗ FAILED: \$ERRORS critical issues found"
+  echo '{"capabilities":{"supabase.precheck.passed":"not_installed"}}'
   exit 1
+elif [ "\$WARNINGS" -gt 0 ]; then
+  echo "⚠ PASSED with \$WARNINGS warnings"
+  echo '{"capabilities":{"supabase.precheck.passed":"installed"}}'
 else
-  echo "✓ Prerequisites OK - ready for Supabase installation"
+  echo "✓ All prerequisites OK - ready for Supabase installation"
+  echo '{"capabilities":{"supabase.precheck.passed":"installed"}}'
 fi
 `,
   },
   {
-    id: 'supabase.cli.install',
-    group: 'supabase',
-    name: 'Installer Supabase CLI',
-    description: 'Installe la CLI Supabase (nécessite NPM)',
-    level: 'simple',
-    risk: 'low',
-    duration: '~2min',
-    icon: Database,
-    prerequisites: [
-      { capability: 'npm.installed', label: 'NPM', required: true }
-    ],
-    verifies: ['supabase.cli.installed'],
-    command: `#!/bin/bash
-set -e
-
-# Verify npm is available
-if ! command -v npm &>/dev/null; then
-  echo "✗ ERROR: NPM is required but not installed"
-  echo ""
-  echo "Please run 'Installer Node.js LTS' first"
-  exit 1
-fi
-
-if command -v supabase &>/dev/null; then
-  echo "Supabase CLI already installed: $(supabase --version)"
-  exit 0
-fi
-
-echo "Installing Supabase CLI..."
-npm install -g supabase
-
-echo ""
-echo "✓ Supabase CLI installed: $(supabase --version)"
-`,
-  },
-  {
-    id: 'supabase.selfhost.pull',
+    id: 'supabase.selfhost.pull_stack',
     group: 'supabase',
     name: 'Télécharger stack Supabase',
-    description: 'Clone le repo docker-compose Supabase',
+    description: 'Clone le repo docker-compose Supabase officiel',
     level: 'simple',
     risk: 'low',
     duration: '~2min',
@@ -1711,27 +1714,325 @@ echo "✓ Supabase CLI installed: $(supabase --version)"
     command: `#!/bin/bash
 set -e
 
-INSTALL_DIR="/opt/supabase"
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME"
 
-if [ -d "$INSTALL_DIR/docker" ]; then
-  echo "Supabase stack already exists at $INSTALL_DIR"
-  cd "$INSTALL_DIR/docker"
-  git pull origin master || true
-  exit 0
+echo "=== Downloading Supabase Stack ==="
+echo "Instance: \$INSTANCE_NAME"
+echo "Directory: \$INSTALL_DIR"
+echo ""
+
+if [ -d "\$INSTALL_DIR/docker" ]; then
+  echo "Stack already exists, updating..."
+  cd "\$INSTALL_DIR"
+  git fetch origin master --depth=1 2>/dev/null || true
+  git reset --hard origin/master 2>/dev/null || true
+  echo "✓ Stack updated"
+else
+  echo "Cloning Supabase repository..."
+  mkdir -p "\$(dirname \$INSTALL_DIR)"
+  git clone --depth 1 --filter=blob:none --sparse https://github.com/supabase/supabase.git "\$INSTALL_DIR"
+  cd "\$INSTALL_DIR"
+  git sparse-checkout set docker
+  echo "✓ Stack downloaded"
 fi
 
-echo "Downloading Supabase self-hosted stack..."
-mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR"
+echo ""
+ls -la "\$INSTALL_DIR/docker/"
+echo ""
+echo '{"capabilities":{"supabase.stack.downloaded":"installed"}}'
+`,
+  },
+  {
+    id: 'supabase.selfhost.configure_env',
+    group: 'supabase',
+    name: 'Configurer environnement Supabase',
+    description: 'Génère .env avec secrets aléatoires sécurisés',
+    level: 'simple',
+    risk: 'low',
+    duration: '~10s',
+    icon: Settings,
+    prerequisites: [
+      { capability: 'supabase.stack.downloaded', label: 'Stack téléchargé', required: true }
+    ],
+    verifies: ['supabase.env.configured'],
+    command: `#!/bin/bash
+set -e
 
-git clone --depth 1 https://github.com/supabase/supabase.git .
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME/docker"
+NETWORK_MODE="\${SUPABASE_NETWORK_MODE:-local}"
+DOMAIN="\${SUPABASE_DOMAIN:-}"
+
+echo "=== Configuring Supabase Environment ==="
+echo "Instance: \$INSTANCE_NAME"
+echo "Mode: \$NETWORK_MODE"
+[ -n "\$DOMAIN" ] && echo "Domain: \$DOMAIN"
+echo ""
+
+cd "\$INSTALL_DIR"
+
+# Generate secure secrets
+generate_secret() {
+  openssl rand -base64 32 | tr -d '\\n/+=' | head -c 32
+}
+
+generate_jwt() {
+  openssl rand -base64 64 | tr -d '\\n/+=' | head -c 64
+}
+
+# Copy example if .env doesn't exist
+if [ ! -f .env ]; then
+  cp .env.example .env 2>/dev/null || touch .env
+fi
+
+# Generate secrets
+JWT_SECRET=\$(generate_jwt)
+ANON_KEY=\$(generate_secret)
+SERVICE_ROLE_KEY=\$(generate_secret)
+POSTGRES_PASSWORD=\$(generate_secret)
+DASHBOARD_PASSWORD=\$(generate_secret)
+
+# Determine site URL
+if [ "\$NETWORK_MODE" = "public" ] && [ -n "\$DOMAIN" ]; then
+  SITE_URL="https://\$DOMAIN"
+  API_EXTERNAL_URL="https://\$DOMAIN"
+  STUDIO_URL="https://studio.\$DOMAIN"
+else
+  SITE_URL="http://localhost:3000"
+  API_EXTERNAL_URL="http://localhost:8000"
+  STUDIO_URL="http://localhost:3000"
+fi
+
+# Update .env file
+cat > .env << EOF
+############
+# Secrets - AUTO-GENERATED - DO NOT COMMIT
+############
+POSTGRES_PASSWORD=\$POSTGRES_PASSWORD
+JWT_SECRET=\$JWT_SECRET
+ANON_KEY=\$ANON_KEY
+SERVICE_ROLE_KEY=\$SERVICE_ROLE_KEY
+DASHBOARD_USERNAME=supabase
+DASHBOARD_PASSWORD=\$DASHBOARD_PASSWORD
+
+############
+# URLs
+############
+SITE_URL=\$SITE_URL
+API_EXTERNAL_URL=\$API_EXTERNAL_URL
+SUPABASE_PUBLIC_URL=\$API_EXTERNAL_URL
+
+############
+# Studio
+############
+STUDIO_DEFAULT_ORGANIZATION=Ikoma
+STUDIO_DEFAULT_PROJECT=supabase-\$INSTANCE_NAME
+STUDIO_PORT=3000
+
+############
+# Database
+############
+POSTGRES_HOST=db
+POSTGRES_DB=postgres
+POSTGRES_PORT=5432
+
+############
+# API
+############
+KONG_HTTP_PORT=8000
+KONG_HTTPS_PORT=8443
+
+############
+# Instance
+############
+INSTANCE_NAME=\$INSTANCE_NAME
+NETWORK_MODE=\$NETWORK_MODE
+DOMAIN=\$DOMAIN
+EOF
+
+echo "✓ Environment configured"
+echo ""
+echo "Generated credentials (save securely):"
+echo "  Dashboard: supabase / \$DASHBOARD_PASSWORD"
+echo "  API URL: \$API_EXTERNAL_URL"
+echo ""
+echo '{"capabilities":{"supabase.env.configured":"installed"}}'
+`,
+  },
+  {
+    id: 'supabase.selfhost.up',
+    group: 'supabase',
+    name: 'Démarrer Supabase',
+    description: 'Lance docker compose up -d',
+    level: 'simple',
+    risk: 'medium',
+    duration: '~5-10min',
+    icon: Database,
+    prerequisites: [
+      { capability: 'supabase.env.configured', label: 'Environnement configuré', required: true }
+    ],
+    verifies: ['supabase.containers.started'],
+    command: `#!/bin/bash
+set -e
+
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME/docker"
+
+echo "=== Starting Supabase Stack ==="
+echo "Instance: \$INSTANCE_NAME"
+echo ""
+
+cd "\$INSTALL_DIR"
+
+# Pull images first
+echo "Pulling Docker images (this may take several minutes)..."
+docker compose pull
 
 echo ""
-echo "✓ Supabase stack downloaded to $INSTALL_DIR"
+echo "Starting containers..."
+docker compose up -d
+
 echo ""
-echo "Next steps:"
-echo "  1. Configure .env file in $INSTALL_DIR/docker"
-echo "  2. Run 'docker compose up -d'"
+echo "Waiting for containers to stabilize (30s)..."
+sleep 30
+
+echo ""
+echo "=== Container Status ==="
+docker compose ps
+
+echo ""
+echo '{"capabilities":{"supabase.containers.started":"installed"}}'
+`,
+  },
+  {
+    id: 'supabase.selfhost.healthcheck',
+    group: 'supabase',
+    name: 'Healthcheck Supabase',
+    description: 'Vérifie tous les services + endpoints HTTP',
+    level: 'simple',
+    risk: 'low',
+    duration: '~30s',
+    icon: Database,
+    prerequisites: [
+      { capability: 'supabase.containers.started', label: 'Containers démarrés', required: true }
+    ],
+    verifies: ['supabase.installed'],
+    command: `#!/bin/bash
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME/docker"
+
+echo "=== Supabase Healthcheck ==="
+echo "Instance: \$INSTANCE_NAME"
+echo ""
+
+cd "\$INSTALL_DIR" 2>/dev/null || { echo "✗ Install directory not found"; exit 1; }
+
+# Check all expected containers are running
+echo "Container status:"
+RUNNING=0
+FAILED=0
+
+for SERVICE in supabase-db supabase-kong supabase-auth supabase-rest supabase-realtime supabase-storage supabase-studio; do
+  if docker compose ps 2>/dev/null | grep -q "\$SERVICE.*Up"; then
+    echo "  ✓ \$SERVICE: running"
+    RUNNING=\$((RUNNING + 1))
+  else
+    echo "  ✗ \$SERVICE: not running"
+    FAILED=\$((FAILED + 1))
+  fi
+done
+
+echo ""
+echo "=== HTTP Endpoints ==="
+
+# Load .env for ports
+source .env 2>/dev/null || true
+API_PORT=\${KONG_HTTP_PORT:-8000}
+STUDIO_PORT=\${STUDIO_PORT:-3000}
+
+# Check Kong API
+if curl -sf -o /dev/null "http://localhost:\$API_PORT/rest/v1/" -H "apikey: \${ANON_KEY:-test}"; then
+  echo "✓ Kong API (port \$API_PORT): responding"
+else
+  echo "⚠ Kong API (port \$API_PORT): not responding (may still be starting)"
+fi
+
+# Check Studio
+if curl -sf -o /dev/null "http://localhost:\$STUDIO_PORT/"; then
+  echo "✓ Studio (port \$STUDIO_PORT): responding"
+else
+  echo "⚠ Studio (port \$STUDIO_PORT): not responding"
+fi
+
+# Check Postgres
+if docker compose exec -T db pg_isready -U postgres &>/dev/null; then
+  echo "✓ PostgreSQL: accepting connections"
+else
+  echo "⚠ PostgreSQL: not ready"
+fi
+
+echo ""
+echo "=== Summary ==="
+if [ "\$FAILED" -eq 0 ]; then
+  echo "✓ Supabase is INSTALLED and healthy (\$RUNNING services running)"
+  echo '{"capabilities":{"supabase.installed":"installed"}}'
+else
+  echo "⚠ Supabase partially running: \$RUNNING OK, \$FAILED failed"
+  echo "Run 'docker compose logs' to debug"
+  echo '{"capabilities":{"supabase.installed":"not_installed"}}'
+  exit 1
+fi
+`,
+  },
+  {
+    id: 'supabase.selfhost.down',
+    group: 'supabase',
+    name: 'Arrêter Supabase',
+    description: 'Stoppe tous les containers Supabase',
+    level: 'simple',
+    risk: 'medium',
+    duration: '~30s',
+    icon: Database,
+    prerequisites: [],
+    verifies: [],
+    command: `#!/bin/bash
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME/docker"
+
+echo "=== Stopping Supabase Stack ==="
+echo "Instance: \$INSTANCE_NAME"
+echo ""
+
+cd "\$INSTALL_DIR" 2>/dev/null || { echo "✗ Install directory not found"; exit 1; }
+
+docker compose down
+
+echo ""
+echo "✓ Supabase stopped"
+`,
+  },
+  {
+    id: 'supabase.selfhost.logs',
+    group: 'supabase',
+    name: 'Logs Supabase',
+    description: 'Affiche les derniers logs de tous les services',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Database,
+    prerequisites: [],
+    verifies: [],
+    command: `#!/bin/bash
+INSTANCE_NAME="\${SUPABASE_INSTANCE:-default}"
+INSTALL_DIR="/opt/ikoma/platform/supabase/\$INSTANCE_NAME/docker"
+
+cd "\$INSTALL_DIR" 2>/dev/null || { echo "✗ Install directory not found"; exit 1; }
+
+echo "=== Recent Supabase Logs (last 50 lines per service) ==="
+echo ""
+
+docker compose logs --tail=50 --timestamps
 `,
   },
 ];
