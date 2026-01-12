@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
@@ -22,6 +22,8 @@ import {
   AlertTriangle,
   Plus,
   Copy,
+  Sparkles,
+  Search,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -60,6 +62,7 @@ import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 import { useCaddyRoutes, useAvailableCaddyRoutes, useCreateCaddyRoute, CaddyRoute } from '@/hooks/useCaddyRoutes';
 import { useSupabaseInstance } from '@/hooks/usePlatformInstances';
+import { useFrameworkDetection } from '@/hooks/useFrameworkDetection';
 import {
   useCreateDeployment,
   useCreateDeploymentSteps,
@@ -143,6 +146,16 @@ const DeployerWizard = () => {
   const createSteps = useCreateDeploymentSteps();
   const updateDeployment = useUpdateDeployment();
   const createRoute = useCreateCaddyRoute();
+  
+  // Framework detection
+  const { 
+    framework: detectedFramework, 
+    isDetecting, 
+    error: detectionError,
+    rawFiles,
+    detectFramework,
+    reset: resetDetection,
+  } = useFrameworkDetection();
 
   const onlineRunners = runners?.filter(r => r.status === 'online') || [];
 
@@ -193,6 +206,32 @@ const DeployerWizard = () => {
       healthcheck_value: '/',
     },
   });
+
+  // Watch repo URL changes for detection
+  const repoUrl = sourceForm.watch('repo_url');
+  const branch = sourceForm.watch('branch');
+
+  // Handle framework detection
+  const handleDetectFramework = useCallback(async () => {
+    if (!repoUrl) return;
+    await detectFramework(repoUrl, branch || 'main');
+  }, [repoUrl, branch, detectFramework]);
+
+  // Apply detected framework settings
+  const handleApplyDetection = useCallback(() => {
+    if (!detectedFramework) return;
+    
+    sourceForm.setValue('deploy_type', detectedFramework.type);
+    configForm.setValue('port', detectedFramework.suggestedPort);
+    if (detectedFramework.suggestedStartCommand) {
+      configForm.setValue('start_command', detectedFramework.suggestedStartCommand);
+    }
+    
+    toast({
+      title: 'Configuration appliquée',
+      description: `Type: ${detectedFramework.name}, Port: ${detectedFramework.suggestedPort}`,
+    });
+  }, [detectedFramework, sourceForm, configForm]);
 
   // Get selected runner's infrastructure
   const selectedRunnerId = targetForm.watch('runner_id');
@@ -509,15 +548,96 @@ const DeployerWizard = () => {
                     <FormItem>
                       <FormLabel>URL du Repository Git</FormLabel>
                       <FormControl>
-                        <div className="relative">
-                          <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                          <Input placeholder="https://github.com/user/repo.git" className="pl-10" {...field} />
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                            <Input placeholder="https://github.com/user/repo.git" className="pl-10" {...field} />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleDetectFramework}
+                            disabled={!field.value || isDetecting}
+                          >
+                            {isDetecting ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Search className="w-4 h-4" />
+                            )}
+                            <span className="ml-2 hidden sm:inline">Détecter</span>
+                          </Button>
                         </div>
                       </FormControl>
+                      <FormDescription>
+                        URL GitHub supportée pour la détection automatique
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
+                {/* Framework Detection Results */}
+                {(detectedFramework || detectionError) && (
+                  <div className="rounded-lg border p-4 bg-muted/30">
+                    {detectionError ? (
+                      <div className="flex items-center gap-2 text-amber-500">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span className="text-sm">{detectionError}</span>
+                      </div>
+                    ) : detectedFramework && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-primary" />
+                            <span className="font-medium">Framework détecté</span>
+                            <Badge 
+                              variant={detectedFramework.confidence === 'high' ? 'default' : 'secondary'}
+                              className="text-xs"
+                            >
+                              {detectedFramework.confidence === 'high' ? 'Confiance élevée' : 
+                               detectedFramework.confidence === 'medium' ? 'Confiance moyenne' : 'Confiance faible'}
+                            </Badge>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={handleApplyDetection}
+                          >
+                            <CheckCircle2 className="w-3 h-3 mr-1.5" />
+                            Appliquer
+                          </Button>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Type:</span>{' '}
+                            <span className="font-medium">{detectedFramework.name}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Déploiement:</span>{' '}
+                            <Badge variant="outline" className="ml-1">
+                              {detectedFramework.type}
+                            </Badge>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Port suggéré:</span>{' '}
+                            <span className="font-mono">{detectedFramework.suggestedPort}</span>
+                          </div>
+                          {detectedFramework.suggestedStartCommand && (
+                            <div>
+                              <span className="text-muted-foreground">Commande:</span>{' '}
+                              <code className="text-xs bg-muted px-1 rounded">{detectedFramework.suggestedStartCommand}</code>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="text-xs text-muted-foreground">
+                          Fichiers détectés: {detectedFramework.detectedFiles.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <FormField
                   control={sourceForm.control}
@@ -539,6 +659,13 @@ const DeployerWizard = () => {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Type de déploiement</FormLabel>
+                      <FormDescription className="mb-3">
+                        {detectedFramework && (
+                          <span className="text-primary">
+                            Suggestion basée sur la détection: {detectedFramework.type}
+                          </span>
+                        )}
+                      </FormDescription>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         {DEPLOY_TYPES.map(type => (
                           <button
@@ -549,11 +676,14 @@ const DeployerWizard = () => {
                               field.value === type.value
                                 ? 'border-primary bg-primary/10'
                                 : 'border-border hover:border-primary/50'
-                            }`}
+                            } ${detectedFramework?.type === type.value && field.value !== type.value ? 'ring-1 ring-primary/30' : ''}`}
                           >
                             <div className="flex items-center gap-3 mb-2">
                               {type.icon}
                               <span className="font-medium">{type.label}</span>
+                              {detectedFramework?.type === type.value && field.value !== type.value && (
+                                <Badge variant="outline" className="text-xs ml-auto">Suggéré</Badge>
+                              )}
                             </div>
                             <p className="text-xs text-muted-foreground">{type.desc}</p>
                           </button>
