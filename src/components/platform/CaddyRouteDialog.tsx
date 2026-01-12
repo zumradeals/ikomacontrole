@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Globe, Server, Plus, Loader2 } from 'lucide-react';
+import { Globe, Server, Plus, Loader2, AlertTriangle, Info } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Form,
   FormControl,
@@ -28,18 +29,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+
+// Types de routage disponibles
+type RoutingType = 'root_only' | 'subdomain_only' | 'root_and_subdomain';
 
 const routeSchema = z.object({
+  routing_type: z.enum(['root_only', 'subdomain_only', 'root_and_subdomain']),
   domain: z
     .string()
     .trim()
     .min(1, 'Le domaine est requis')
     .max(253, 'Domaine trop long')
     .regex(
-      /^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/,
-      'Domaine invalide (ex: app.example.com ou *.example.com)'
+      /^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/,
+      'Domaine invalide (ex: example.com)'
     ),
+  subdomain: z
+    .string()
+    .trim()
+    .max(63, 'Sous-domaine trop long')
+    .regex(/^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/, 'Sous-domaine invalide')
+    .optional()
+    .or(z.literal('')),
   backend_host: z
     .string()
     .trim()
@@ -53,42 +66,102 @@ const routeSchema = z.object({
       return port >= 1 && port <= 65535;
     }, 'Port doit être entre 1 et 65535'),
   protocol: z.enum(['http', 'https']),
-  enable_https: z.boolean(),
+}).refine((data) => {
+  // Validation conditionnelle : subdomain requis si routing_type inclut subdomain
+  if (data.routing_type === 'subdomain_only' || data.routing_type === 'root_and_subdomain') {
+    return data.subdomain && data.subdomain.length > 0;
+  }
+  return true;
+}, {
+  message: 'Le sous-domaine est requis pour ce type de routage',
+  path: ['subdomain'],
 });
 
 type RouteFormValues = z.infer<typeof routeSchema>;
 
+export interface CaddyRouteSubmitData {
+  routing_type: RoutingType;
+  domain: string;
+  subdomain?: string;
+  backend_host: string;
+  backend_port: number;
+  backend_protocol: string;
+}
+
 interface CaddyRouteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (domain: string, backendUrl: string, enableHttps: boolean) => Promise<void>;
+  onSubmit: (data: CaddyRouteSubmitData) => Promise<void>;
   isLoading?: boolean;
+  hasActiveRunner?: boolean;
 }
+
+const ROUTING_OPTIONS = [
+  {
+    value: 'root_only' as const,
+    label: 'Domaine racine uniquement',
+    description: 'example.com → backend',
+    example: 'example.com',
+  },
+  {
+    value: 'subdomain_only' as const,
+    label: 'Sous-domaine uniquement',
+    description: 'app.example.com → backend',
+    example: 'app.example.com',
+  },
+  {
+    value: 'root_and_subdomain' as const,
+    label: 'Domaine + sous-domaine',
+    description: 'example.com et app.example.com → backend',
+    example: 'example.com + app.example.com',
+  },
+];
 
 export function CaddyRouteDialog({
   open,
   onOpenChange,
   onSubmit,
   isLoading = false,
+  hasActiveRunner = true,
 }: CaddyRouteDialogProps) {
   const [submitting, setSubmitting] = useState(false);
 
   const form = useForm<RouteFormValues>({
     resolver: zodResolver(routeSchema),
     defaultValues: {
+      routing_type: 'subdomain_only',
       domain: '',
+      subdomain: '',
       backend_host: 'localhost',
       backend_port: '3000',
       protocol: 'http',
-      enable_https: true,
     },
   });
 
+  const routingType = form.watch('routing_type');
+  const domain = form.watch('domain');
+  const subdomain = form.watch('subdomain');
+
+  // Reset subdomain when switching to root_only
+  useEffect(() => {
+    if (routingType === 'root_only') {
+      form.setValue('subdomain', '');
+    }
+  }, [routingType, form]);
+
   const handleSubmit = async (values: RouteFormValues) => {
+    if (!hasActiveRunner) return;
+    
     setSubmitting(true);
     try {
-      const backendUrl = `${values.protocol}://${values.backend_host}:${values.backend_port}`;
-      await onSubmit(values.domain, backendUrl, values.enable_https);
+      await onSubmit({
+        routing_type: values.routing_type,
+        domain: values.domain,
+        subdomain: values.subdomain || undefined,
+        backend_host: values.backend_host,
+        backend_port: parseInt(values.backend_port, 10),
+        backend_protocol: values.protocol,
+      });
       form.reset();
       onOpenChange(false);
     } finally {
@@ -97,6 +170,23 @@ export function CaddyRouteDialog({
   };
 
   const isSubmitting = submitting || isLoading;
+
+  // Génère l'aperçu des domaines
+  const getPreview = () => {
+    const d = domain || 'example.com';
+    const s = subdomain || 'app';
+    
+    switch (routingType) {
+      case 'root_only':
+        return [d];
+      case 'subdomain_only':
+        return [`${s}.${d}`];
+      case 'root_and_subdomain':
+        return [d, `${s}.${d}`];
+      default:
+        return [];
+    }
+  };
 
   // Common port presets
   const portPresets = [
@@ -108,9 +198,11 @@ export function CaddyRouteDialog({
     { label: 'Supabase (8000)', value: '8000' },
   ];
 
+  const showSubdomainField = routingType === 'subdomain_only' || routingType === 'root_and_subdomain';
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Globe className="w-5 h-5 text-primary" />
@@ -121,20 +213,80 @@ export function CaddyRouteDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {!hasActiveRunner && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              <strong>Aucun runner actif.</strong> Un runner en ligne est requis pour exécuter la configuration Caddy.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-            {/* Domain */}
+            {/* Type de routage */}
+            <FormField
+              control={form.control}
+              name="routing_type"
+              render={({ field }) => (
+                <FormItem className="space-y-3">
+                  <FormLabel>Type de routage *</FormLabel>
+                  <FormControl>
+                    <RadioGroup
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                      className="flex flex-col space-y-2"
+                      disabled={isSubmitting}
+                    >
+                      {ROUTING_OPTIONS.map((option) => (
+                        <div
+                          key={option.value}
+                          className={`flex items-start space-x-3 rounded-lg border p-3 cursor-pointer transition-colors ${
+                            field.value === option.value
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border hover:bg-muted/50'
+                          }`}
+                          onClick={() => field.onChange(option.value)}
+                        >
+                          <RadioGroupItem value={option.value} id={option.value} className="mt-0.5" />
+                          <div className="flex-1">
+                            <Label htmlFor={option.value} className="font-medium cursor-pointer">
+                              {option.label}
+                            </Label>
+                            <p className="text-sm text-muted-foreground">{option.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </RadioGroup>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Info pour domaine racine hébergé ailleurs */}
+            {routingType === 'subdomain_only' && (
+              <Alert className="border-blue-500/30 bg-blue-500/5">
+                <Info className="h-4 w-4 text-blue-500" />
+                <AlertDescription className="text-sm">
+                  Le domaine racine peut rester hébergé ailleurs (ex: site vitrine, landing page).
+                  Seul le sous-domaine sera redirigé vers votre backend.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Domaine racine */}
             <FormField
               control={form.control}
               name="domain"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Domaine</FormLabel>
+                  <FormLabel>Domaine racine *</FormLabel>
                   <FormControl>
                     <div className="relative">
                       <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="app.example.com"
+                        placeholder="example.com"
                         className="pl-10"
                         {...field}
                         disabled={isSubmitting}
@@ -142,12 +294,40 @@ export function CaddyRouteDialog({
                     </div>
                   </FormControl>
                   <FormDescription>
-                    Le domaine qui sera redirigé (wildcard supporté: *.example.com)
+                    Le domaine principal (sans www, sans sous-domaine)
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
+
+            {/* Sous-domaine (conditionnel) */}
+            {showSubdomainField && (
+              <FormField
+                control={form.control}
+                name="subdomain"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Sous-domaine *</FormLabel>
+                    <FormControl>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder="app, api, dashboard..."
+                          {...field}
+                          disabled={isSubmitting}
+                          className="flex-1"
+                        />
+                        <span className="text-muted-foreground">.{domain || 'example.com'}</span>
+                      </div>
+                    </FormControl>
+                    <FormDescription>
+                      Le préfixe du sous-domaine (ex: app, api, admin)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             {/* Backend Configuration */}
             <div className="space-y-4 rounded-lg border border-border p-4 bg-muted/30">
@@ -242,36 +422,16 @@ export function CaddyRouteDialog({
               />
             </div>
 
-            {/* HTTPS Auto */}
-            <FormField
-              control={form.control}
-              name="enable_https"
-              render={({ field }) => (
-                <FormItem className="flex flex-row items-center justify-between rounded-lg border border-border p-4 bg-muted/30">
-                  <div className="space-y-0.5">
-                    <FormLabel className="text-base">HTTPS automatique</FormLabel>
-                    <FormDescription>
-                      Caddy obtiendra automatiquement un certificat Let's Encrypt
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                      disabled={isSubmitting}
-                    />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-
             {/* Preview */}
             <div className="rounded-lg border border-border p-4 bg-muted/50">
-              <p className="text-xs text-muted-foreground mb-2">Aperçu de la configuration:</p>
-              <code className="text-sm font-mono text-primary">
-                {form.watch('domain') || 'domaine.com'} → {form.watch('protocol')}://
-                {form.watch('backend_host')}:{form.watch('backend_port')}
-              </code>
+              <p className="text-xs text-muted-foreground mb-2">Routes qui seront créées:</p>
+              <div className="space-y-1">
+                {getPreview().map((preview, idx) => (
+                  <code key={idx} className="block text-sm font-mono text-primary">
+                    https://{preview} → {form.watch('protocol')}://{form.watch('backend_host')}:{form.watch('backend_port')}
+                  </code>
+                ))}
+              </div>
             </div>
 
             {/* Actions */}
@@ -284,7 +444,7 @@ export function CaddyRouteDialog({
               >
                 Annuler
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button type="submit" disabled={isSubmitting || !hasActiveRunner}>
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
