@@ -6,6 +6,43 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
+// Helper to hash token
+async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(token)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// Helper to get runner by token
+async function getRunnerByToken(supabase: any, token: string) {
+  const tokenHash = await hashToken(token)
+  const { data: runner } = await supabase
+    .from('runners')
+    .select('id, status, name')
+    .eq('token_hash', tokenHash)
+    .maybeSingle()
+  return runner
+}
+
+// Determine final status based on exit_code (source of truth)
+function determineOrderStatus(exitCode: number | null, reportedStatus: string): 'running' | 'completed' | 'failed' {
+  // If running, keep as running
+  if (reportedStatus === 'running') return 'running'
+  
+  // Use exit_code as source of truth for final status
+  if (exitCode === 0) return 'completed'
+  if (exitCode !== null && exitCode !== 0) return 'failed'
+  
+  // Fallback to reported status if no exit_code
+  if (reportedStatus === 'completed' || reportedStatus === 'applied') return 'completed'
+  if (reportedStatus === 'failed') return 'failed'
+  
+  // Default to failed if ambiguous with finished report
+  return 'failed'
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -15,19 +52,15 @@ Deno.serve(async (req) => {
   const url = new URL(req.url)
   const pathname = url.pathname
   
-  // Log for debugging
   console.log('Incoming request:', req.method, pathname)
   
-  // Extract path - the pathname will be like /runner-api/health or /functions/v1/runner-api/health
+  // Extract path
   let path = pathname
-  
-  // Handle /functions/v1/runner-api prefix
   if (path.includes('/runner-api')) {
     const idx = path.indexOf('/runner-api')
     path = path.substring(idx + '/runner-api'.length)
   }
   
-  // Normalize: ensure starts with / and handle empty
   if (!path || path === '') {
     path = '/'
   } else if (!path.startsWith('/')) {
@@ -43,7 +76,7 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           status: 'ok', 
           timestamp: new Date().toISOString(),
-          version: '1.0.0'
+          version: '2.0.0'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -51,7 +84,422 @@ Deno.serve(async (req) => {
 
     // GET /install-runner.sh - Installation script
     if (req.method === 'GET' && path === '/install-runner.sh') {
-      const installScript = `#!/bin/bash
+      const installScript = generateInstallScript()
+      return new Response(installScript, { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'text/plain; charset=utf-8' 
+        } 
+      })
+    }
+
+    // GET /uninstall-runner.sh - Uninstallation script
+    if (req.method === 'GET' && path === '/uninstall-runner.sh') {
+      const uninstallScript = generateUninstallScript()
+      return new Response(uninstallScript, { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'text/plain; charset=utf-8' 
+        } 
+      })
+    }
+
+    // Initialize Supabase client with service role
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+
+    // POST /register - Runner registration
+    if (req.method === 'POST' && path === '/register') {
+      return await handleRegister(req, supabase)
+    }
+
+    // POST /heartbeat - Runner heartbeat
+    if (req.method === 'POST' && path === '/heartbeat') {
+      return await handleHeartbeat(req, supabase)
+    }
+
+    // GET /orders/poll - Poll for pending orders
+    if (req.method === 'GET' && path === '/orders/poll') {
+      return await handleOrdersPoll(req, supabase)
+    }
+
+    // POST /orders/report - Report order execution (STRICT JSON only)
+    if (req.method === 'POST' && path === '/orders/report') {
+      return await handleOrdersReport(req, supabase)
+    }
+
+    // 404 for unknown routes
+    return new Response(
+      JSON.stringify({ error: 'Not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error: unknown) {
+    console.error('Runner API error:', error)
+    const message = error instanceof Error ? error.message : 'Internal server error'
+    return new Response(
+      JSON.stringify({ error: message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+})
+
+// ============ HANDLERS ============
+
+async function handleRegister(req: Request, supabase: any): Promise<Response> {
+  const body = await req.json()
+  const { name, token, host_info, capabilities } = body
+
+  if (!name || !token) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'name and token are required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const tokenHash = await hashToken(token)
+
+  // Check if runner with same name exists
+  const { data: existing } = await supabase
+    .from('runners')
+    .select('id')
+    .eq('name', name)
+    .maybeSingle()
+
+  if (existing) {
+    // Update existing runner
+    const { data: runner, error } = await supabase
+      .from('runners')
+      .update({
+        token_hash: tokenHash,
+        status: 'online',
+        host_info: host_info || {},
+        capabilities: capabilities || {},
+        last_seen_at: new Date().toISOString()
+      })
+      .eq('id', existing.id)
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return new Response(
+      JSON.stringify({ success: true, runner_id: runner.id, message: 'Runner updated' }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Create new runner
+  const { data: runner, error } = await supabase
+    .from('runners')
+    .insert({
+      name,
+      token_hash: tokenHash,
+      status: 'online',
+      host_info: host_info || {},
+      capabilities: capabilities || {},
+      last_seen_at: new Date().toISOString()
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+
+  return new Response(
+    JSON.stringify({ success: true, runner_id: runner.id, message: 'Runner registered' }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleHeartbeat(req: Request, supabase: any): Promise<Response> {
+  const runnerToken = req.headers.get('x-runner-token')
+  if (!runnerToken) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'x-runner-token header required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const runner = await getRunnerByToken(supabase, runnerToken)
+
+  if (!runner) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Runner not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Update last_seen_at and status
+  const { error } = await supabase
+    .from('runners')
+    .update({
+      last_seen_at: new Date().toISOString(),
+      status: runner.status === 'paused' ? 'paused' : 'online'
+    })
+    .eq('id', runner.id)
+
+  if (error) throw error
+
+  return new Response(
+    JSON.stringify({ success: true, timestamp: new Date().toISOString() }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleOrdersPoll(req: Request, supabase: any): Promise<Response> {
+  const runnerToken = req.headers.get('x-runner-token')
+  if (!runnerToken) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'x-runner-token header required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const runner = await getRunnerByToken(supabase, runnerToken)
+
+  if (!runner) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Runner not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Fetch pending orders for this runner
+  const { data: orders, error: ordersError } = await supabase
+    .from('orders')
+    .select('id, category, name, command, description, created_at')
+    .eq('runner_id', runner.id)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(10)
+
+  if (ordersError) throw ordersError
+
+  return new Response(
+    JSON.stringify({ success: true, orders: orders || [] }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleOrdersReport(req: Request, supabase: any): Promise<Response> {
+  const runnerToken = req.headers.get('x-runner-token')
+  if (!runnerToken) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'x-runner-token header required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Check Content-Type
+  const contentType = req.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: 'invalid_content_type', 
+        details: 'Content-Type must be application/json' 
+      }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const runner = await getRunnerByToken(supabase, runnerToken)
+
+  if (!runner) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'Runner not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const rawBody = await req.text()
+
+  // Strict JSON parsing only
+  let body: any
+  try {
+    body = JSON.parse(rawBody)
+  } catch (parseError) {
+    // Store in runner_report_errors for debugging
+    await supabase.from('runner_report_errors').insert({
+      runner_id: runner.id,
+      raw_body: rawBody.slice(0, 10000),
+      error_type: 'invalid_json',
+      error_details: parseError instanceof Error ? parseError.message : 'JSON parse failed',
+    })
+
+    // Also log to runner_logs
+    await supabase.from('runner_logs').insert({
+      runner_id: runner.id,
+      level: 'error',
+      event_type: 'report_parse_error',
+      message: 'Failed to parse /orders/report body - Invalid JSON',
+      raw_body: rawBody.slice(0, 5000),
+      error_details: parseError instanceof Error ? parseError.message : 'JSON parse failed',
+    })
+
+    console.error('Invalid JSON in /orders/report:', rawBody.slice(0, 500))
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: 'invalid_json', 
+        details: 'Request body must be valid JSON' 
+      }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Validate required fields
+  const { 
+    order_id, 
+    runner_id,
+    status: reportedStatus,
+    started_at,
+    finished_at,
+    exit_code,
+    stdout_tail,
+    stderr_tail,
+    result,
+    error_message,
+    meta
+  } = body
+
+  // Determine which fields are missing
+  const missingFields: string[] = []
+  if (!order_id) missingFields.push('order_id')
+  if (!reportedStatus) missingFields.push('status')
+
+  const reportIncomplete = missingFields.length > 0 || exit_code === undefined
+
+  if (!order_id || !reportedStatus) {
+    await supabase.from('runner_logs').insert({
+      runner_id: runner.id,
+      level: 'warn',
+      event_type: 'report_incomplete',
+      message: `Incomplete report: missing ${missingFields.join(', ')}`,
+      raw_body: rawBody.slice(0, 5000),
+      parsed_data: body,
+    })
+
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: 'missing_required_fields', 
+        details: `Required fields: order_id, status. Missing: ${missingFields.join(', ')}` 
+      }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Log successful report reception
+  await supabase.from('runner_logs').insert({
+    runner_id: runner.id,
+    level: 'info',
+    event_type: 'report_received',
+    message: `Report: order=${order_id}, status=${reportedStatus}, exit_code=${exit_code ?? 'null'}`,
+    raw_body: rawBody.slice(0, 5000),
+    parsed_data: body,
+  })
+
+  // Determine final status using exit_code as source of truth
+  const finalStatus = determineOrderStatus(exit_code ?? null, reportedStatus)
+
+  // Build update object
+  const updateData: Record<string, unknown> = {
+    status: finalStatus,
+    report_incomplete: reportIncomplete,
+  }
+
+  // Handle timestamps
+  if (reportedStatus === 'running' || started_at) {
+    updateData.started_at = started_at || new Date().toISOString()
+  }
+  
+  if (finished_at || (finalStatus === 'completed' || finalStatus === 'failed')) {
+    updateData.completed_at = finished_at || new Date().toISOString()
+  }
+
+  // Store exit_code
+  if (exit_code !== undefined) {
+    updateData.exit_code = exit_code
+  }
+
+  // Store output tails
+  if (stdout_tail) {
+    updateData.stdout_tail = String(stdout_tail).slice(0, 10000)
+  }
+  if (stderr_tail) {
+    updateData.stderr_tail = String(stderr_tail).slice(0, 10000)
+  }
+
+  // Store result
+  if (result !== undefined) {
+    updateData.result = result || {}
+  }
+
+  // Store error message (prioritize stderr_tail if error_message not provided)
+  if (error_message) {
+    updateData.error_message = error_message
+  } else if (finalStatus === 'failed' && stderr_tail) {
+    updateData.error_message = String(stderr_tail).slice(0, 1000)
+  }
+
+  // Store meta (playbook, version, etc.)
+  if (meta) {
+    updateData.meta = meta
+  }
+
+  // Update order
+  const { error: updateError } = await supabase
+    .from('orders')
+    .update(updateData)
+    .eq('id', order_id)
+    .eq('runner_id', runner.id)
+
+  if (updateError) {
+    console.error('Failed to update order:', updateError)
+    throw updateError
+  }
+
+  // If detection order completed, update infrastructure capabilities
+  if (finalStatus === 'completed' && result?.capabilities) {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('infrastructure_id, category')
+      .eq('id', order_id)
+      .single()
+
+    if (order?.category === 'detection' && order?.infrastructure_id) {
+      const infraUpdate: Record<string, unknown> = {
+        capabilities: result.capabilities,
+      }
+
+      if (result.system) {
+        if (result.system.os) infraUpdate.os = result.system.os
+        if (result.system.architecture) infraUpdate.architecture = result.system.architecture
+        if (result.system.distribution) infraUpdate.distribution = result.system.distribution
+        if (result.system.cpu_cores) infraUpdate.cpu_cores = result.system.cpu_cores
+        if (result.system.ram_mb) infraUpdate.ram_gb = Math.round(result.system.ram_mb / 1024)
+        if (result.system.disk_gb) infraUpdate.disk_gb = result.system.disk_gb
+      }
+
+      await supabase
+        .from('infrastructures')
+        .update(infraUpdate)
+        .eq('id', order.infrastructure_id)
+    }
+  }
+
+  return new Response(
+    JSON.stringify({ success: true }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+// ============ SCRIPT GENERATORS ============
+
+function generateInstallScript(): string {
+  return `#!/bin/bash
 set -e
 
 # Colors for output
@@ -86,7 +534,7 @@ if [ -z "\$TOKEN" ] || [ -z "\$API_URL" ]; then
   exit 1
 fi
 
-echo -e "\${GREEN}=== Ikoma Runner Installation ===\${NC}"
+echo -e "\${GREEN}=== Ikoma Runner Installation v2.0 ===\${NC}"
 echo "API URL: \$API_URL"
 echo ""
 
@@ -120,7 +568,6 @@ RESPONSE=\$(curl -s -X POST "\$API_URL/register" \\
 
 echo "Response: \$RESPONSE"
 
-# Check if registration was successful
 if echo "\$RESPONSE" | grep -q '"success":true'; then
   echo ""
   echo -e "\${GREEN}✓ Runner registered successfully!\${NC}"
@@ -130,6 +577,15 @@ else
   exit 1
 fi
 
+# Install jq if not present
+if ! command -v jq &> /dev/null; then
+  echo -e "\${YELLOW}Installing jq...\${NC}"
+  apt-get update -qq && apt-get install -y -qq jq 2>/dev/null || yum install -y -q jq 2>/dev/null || apk add -q jq 2>/dev/null || {
+    echo -e "\${RED}Failed to install jq. Please install it manually.\${NC}"
+    exit 1
+  }
+fi
+
 # Create systemd service
 echo ""
 echo -e "\${YELLOW}Creating systemd service...\${NC}"
@@ -137,8 +593,8 @@ echo -e "\${YELLOW}Creating systemd service...\${NC}"
 INSTALL_DIR="/opt/ikoma-runner"
 mkdir -p \$INSTALL_DIR
 
-# Create main runner script (heartbeat + order polling + execution)
-cat > \$INSTALL_DIR/runner.sh << 'RUNNER_EOF'
+# Create main runner script (v2 with proper JSON reporting)
+cat > \$INSTALL_DIR/runner.sh << 'RUNNER_SCRIPT_EOF'
 #!/bin/bash
 API_URL="\$1"
 TOKEN="\$2"
@@ -146,13 +602,17 @@ HEARTBEAT_INTERVAL=\${3:-30}
 POLL_INTERVAL=\${4:-5}
 
 LAST_HEARTBEAT=0
+RUNNER_VERSION="2.0.0"
 
 log() {
   echo "\$(date '+%Y-%m-%d %H:%M:%S'): \$1"
 }
 
 send_heartbeat() {
-  RESPONSE=\$(curl -s -X POST "\$API_URL/heartbeat" -H "x-runner-token: \$TOKEN" 2>&1)
+  RESPONSE=\$(curl -s -X POST "\$API_URL/heartbeat" \\
+    -H "x-runner-token: \$TOKEN" \\
+    -H "Content-Type: application/json" \\
+    -d "{\"version\": \"\$RUNNER_VERSION\", \"seen_at\": \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" 2>&1)
   if echo "\$RESPONSE" | grep -q '"success":true'; then
     log "Heartbeat OK"
   else
@@ -160,16 +620,64 @@ send_heartbeat() {
   fi
 }
 
+# Send report with proper JSON format (v2 contract)
+send_report() {
+  local ORDER_ID="\$1"
+  local STATUS="\$2"
+  local EXIT_CODE="\$3"
+  local STDOUT_TAIL="\$4"
+  local STDERR_TAIL="\$5"
+  local STARTED_AT="\$6"
+  local FINISHED_AT="\$7"
+  local RESULT="\$8"
+  
+  # Escape strings for JSON
+  local ESCAPED_STDOUT=\$(echo "\$STDOUT_TAIL" | jq -Rs . 2>/dev/null || echo '""')
+  local ESCAPED_STDERR=\$(echo "\$STDERR_TAIL" | jq -Rs . 2>/dev/null || echo '""')
+  
+  # Build JSON payload
+  local PAYLOAD
+  if [ -n "\$RESULT" ]; then
+    PAYLOAD=\$(cat <<PAYLOAD_EOF
+{
+  "order_id": "\$ORDER_ID",
+  "status": "\$STATUS",
+  "exit_code": \$EXIT_CODE,
+  "stdout_tail": \$ESCAPED_STDOUT,
+  "stderr_tail": \$ESCAPED_STDERR,
+  "started_at": "\$STARTED_AT",
+  "finished_at": "\$FINISHED_AT",
+  "result": \$RESULT,
+  "meta": {"runner_version": "\$RUNNER_VERSION"}
+}
+PAYLOAD_EOF
+)
+  else
+    PAYLOAD=\$(cat <<PAYLOAD_EOF
+{
+  "order_id": "\$ORDER_ID",
+  "status": "\$STATUS",
+  "exit_code": \$EXIT_CODE,
+  "stdout_tail": \$ESCAPED_STDOUT,
+  "stderr_tail": \$ESCAPED_STDERR,
+  "started_at": "\$STARTED_AT",
+  "finished_at": "\$FINISHED_AT",
+  "meta": {"runner_version": "\$RUNNER_VERSION"}
+}
+PAYLOAD_EOF
+)
+  fi
+  
+  curl -s -X POST "\$API_URL/orders/report" \\
+    -H "x-runner-token: \$TOKEN" \\
+    -H "Content-Type: application/json" \\
+    -d "\$PAYLOAD" > /dev/null
+}
+
 poll_orders() {
   ORDERS=\$(curl -s -X GET "\$API_URL/orders/poll" -H "x-runner-token: \$TOKEN" 2>&1)
   
   if ! echo "\$ORDERS" | grep -q '"success":true'; then
-    return
-  fi
-  
-  # Extract orders array - check if jq is available
-  if ! command -v jq &> /dev/null; then
-    log "jq not installed, skipping order processing"
     return
   fi
   
@@ -186,66 +694,56 @@ poll_orders() {
       
       log "Executing order: \$ORDER_NAME (\$ORDER_ID)"
       
+      STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      
       # Report running status
-      curl -s -X POST "\$API_URL/orders/report" \\
-        -H "x-runner-token: \$TOKEN" \\
-        -H "Content-Type: application/json" \\
-        -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"running\", \"progress\": 0}" > /dev/null
+      send_report "\$ORDER_ID" "running" "null" "" "" "\$STARTED_AT" "null" ""
       
       # Execute command and capture output
-      TMPFILE=\$(mktemp)
-      if bash -c "\$ORDER_CMD" > "\$TMPFILE" 2>&1; then
-        OUTPUT=\$(cat "\$TMPFILE")
-        log "Order completed successfully"
+      STDOUT_FILE=\$(mktemp)
+      STDERR_FILE=\$(mktemp)
+      
+      set +e
+      bash -c "\$ORDER_CMD" > "\$STDOUT_FILE" 2> "\$STDERR_FILE"
+      EXIT_CODE=\$?
+      set -e
+      
+      FINISHED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      
+      # Read outputs (last 10KB)
+      STDOUT_TAIL=\$(tail -c 10000 "\$STDOUT_FILE" 2>/dev/null || echo "")
+      STDERR_TAIL=\$(tail -c 10000 "\$STDERR_FILE" 2>/dev/null || echo "")
+      
+      # Determine status based on exit code (source of truth)
+      if [ "\$EXIT_CODE" -eq 0 ]; then
+        STATUS="applied"
+        log "Order completed successfully (exit_code=0)"
         
-        # For detection orders, parse the result
+        # For detection orders, try to extract structured result
         if [ "\$ORDER_CATEGORY" = "detection" ]; then
-          RESULT=\$(echo "\$OUTPUT" | grep -A 100 '{"success":' | head -1)
-          if [ -n "\$RESULT" ]; then
-            curl -s -X POST "\$API_URL/orders/report" \\
-              -H "x-runner-token: \$TOKEN" \\
-              -H "Content-Type: application/json" \\
-              -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": \$RESULT}" > /dev/null
+          RESULT=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
+          if [ -n "\$RESULT" ] && echo "\$RESULT" | jq . >/dev/null 2>&1; then
+            send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
           else
-            curl -s -X POST "\$API_URL/orders/report" \\
-              -H "x-runner-token: \$TOKEN" \\
-              -H "Content-Type: application/json" \\
-              -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": {\"output\": \"Detection completed\"}}" > /dev/null
+            send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "{\"output\": \"Detection completed\"}"
           fi
         else
-          # Escape output for JSON
-          ESCAPED_OUTPUT=\$(echo "\$OUTPUT" | head -c 10000 | jq -Rs . 2>/dev/null || echo '\"output too large or invalid\"')
-          curl -s -X POST "\$API_URL/orders/report" \\
-            -H "x-runner-token: \$TOKEN" \\
-            -H "Content-Type: application/json" \\
-            -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"completed\", \"progress\": 100, \"result\": {\"output\": \$ESCAPED_OUTPUT}}" > /dev/null
+          send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
         fi
       else
-        EXIT_CODE=\$?
-        ERROR_OUTPUT=\$(cat "\$TMPFILE" | head -c 5000)
-        log "Order failed with exit code \$EXIT_CODE"
-        
-        ESCAPED_ERROR=\$(echo "\$ERROR_OUTPUT" | jq -Rs . 2>/dev/null || echo '"Command failed"')
-        curl -s -X POST "\$API_URL/orders/report" \\
-          -H "x-runner-token: \$TOKEN" \\
-          -H "Content-Type: application/json" \\
-          -d "{\"order_id\": \"\$ORDER_ID\", \"status\": \"failed\", \"error_message\": \$ESCAPED_ERROR}" > /dev/null
+        STATUS="failed"
+        log "Order failed with exit_code=\$EXIT_CODE"
+        send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
       fi
       
-      rm -f "\$TMPFILE"
+      rm -f "\$STDOUT_FILE" "\$STDERR_FILE"
     done
   fi
 }
 
-log "Starting Ikoma Runner"
+log "Starting Ikoma Runner v\$RUNNER_VERSION"
 log "API URL: \$API_URL"
 log "Heartbeat interval: \${HEARTBEAT_INTERVAL}s, Poll interval: \${POLL_INTERVAL}s"
-
-# Check and install jq if needed
-if ! command -v jq &> /dev/null; then
-  log "Installing jq..."
-  apt-get update -qq && apt-get install -y -qq jq 2>/dev/null || yum install -y -q jq 2>/dev/null || apk add -q jq 2>/dev/null || log "Warning: Could not install jq"
-fi
 
 # Initial heartbeat
 send_heartbeat
@@ -264,7 +762,7 @@ while true; do
   
   sleep \$POLL_INTERVAL
 done
-RUNNER_EOF
+RUNNER_SCRIPT_EOF
 
 chmod +x \$INSTALL_DIR/runner.sh
 
@@ -274,6 +772,7 @@ API_URL="\$API_URL"
 TOKEN="\$TOKEN"
 HEARTBEAT_INTERVAL=30
 POLL_INTERVAL=5
+VERSION="2.0.0"
 CONFIG_EOF
 
 chmod 600 \$INSTALL_DIR/config
@@ -281,7 +780,7 @@ chmod 600 \$INSTALL_DIR/config
 # Create systemd service file
 cat > /etc/systemd/system/ikoma-runner.service << SERVICE_EOF
 [Unit]
-Description=Ikoma Runner Service
+Description=Ikoma Runner Service v2.0
 After=network-online.target
 Wants=network-online.target
 
@@ -313,17 +812,10 @@ echo "  systemctl stop ikoma-runner      - Stop service"
 echo ""
 echo -e "\${GREEN}Installation complete!\${NC}"
 `
-      return new Response(installScript, { 
-        headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'text/plain; charset=utf-8' 
-        } 
-      })
-    }
+}
 
-    // GET /uninstall-runner.sh - Uninstallation script
-    if (req.method === 'GET' && path === '/uninstall-runner.sh') {
-      const uninstallScript = `#!/bin/bash
+function generateUninstallScript(): string {
+  return `#!/bin/bash
 set -e
 
 # Colors for output
@@ -367,363 +859,4 @@ echo -e "\${GREEN}✓ Ikoma Runner uninstalled successfully!\${NC}"
 echo ""
 echo -e "\${YELLOW}Note: The runner entry in the dashboard must be deleted manually.\${NC}"
 `
-      return new Response(uninstallScript, { 
-        headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'text/plain; charset=utf-8' 
-        } 
-      })
-    }
-
-    // Initialize Supabase client with service role for runner operations
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-    // POST /register - Runner registration
-    if (req.method === 'POST' && path === '/register') {
-      const body = await req.json()
-      const { name, token, host_info, capabilities } = body
-
-      if (!name || !token) {
-        return new Response(
-          JSON.stringify({ error: 'name and token are required' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Hash the token for storage
-      const encoder = new TextEncoder()
-      const data = encoder.encode(token)
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      const hashArray = Array.from(new Uint8Array(hashBuffer))
-      const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-
-      // Check if runner with same name exists
-      const { data: existing } = await supabase
-        .from('runners')
-        .select('id')
-        .eq('name', name)
-        .maybeSingle()
-
-      if (existing) {
-        // Update existing runner
-        const { data: runner, error } = await supabase
-          .from('runners')
-          .update({
-            token_hash: tokenHash,
-            status: 'online',
-            host_info: host_info || {},
-            capabilities: capabilities || {},
-            last_seen_at: new Date().toISOString()
-          })
-          .eq('id', existing.id)
-          .select()
-          .single()
-
-        if (error) throw error
-
-        return new Response(
-          JSON.stringify({ success: true, runner_id: runner.id, message: 'Runner updated' }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Create new runner
-      const { data: runner, error } = await supabase
-        .from('runners')
-        .insert({
-          name,
-          token_hash: tokenHash,
-          status: 'online',
-          host_info: host_info || {},
-          capabilities: capabilities || {},
-          last_seen_at: new Date().toISOString()
-        })
-        .select()
-        .single()
-
-      if (error) throw error
-
-      return new Response(
-        JSON.stringify({ success: true, runner_id: runner.id, message: 'Runner registered' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // POST /heartbeat - Runner heartbeat
-    if (req.method === 'POST' && path === '/heartbeat') {
-      const runnerToken = req.headers.get('x-runner-token')
-      if (!runnerToken) {
-        return new Response(
-          JSON.stringify({ error: 'x-runner-token header required' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Hash the token to find the runner
-      const encoder = new TextEncoder()
-      const data = encoder.encode(runnerToken)
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      const hashArray = Array.from(new Uint8Array(hashBuffer))
-      const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-
-      const { data: runner, error: findError } = await supabase
-        .from('runners')
-        .select('id, status')
-        .eq('token_hash', tokenHash)
-        .maybeSingle()
-
-      if (!runner) {
-        return new Response(
-          JSON.stringify({ error: 'Runner not found' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Update last_seen_at and status
-      const { error } = await supabase
-        .from('runners')
-        .update({
-          last_seen_at: new Date().toISOString(),
-          status: runner.status === 'paused' ? 'paused' : 'online'
-        })
-        .eq('id', runner.id)
-
-      if (error) throw error
-
-      return new Response(
-        JSON.stringify({ success: true, timestamp: new Date().toISOString() }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // GET /orders/poll - Poll for pending orders
-    if (req.method === 'GET' && path === '/orders/poll') {
-      const runnerToken = req.headers.get('x-runner-token')
-      if (!runnerToken) {
-        return new Response(
-          JSON.stringify({ error: 'x-runner-token header required' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Verify runner exists
-      const encoder = new TextEncoder()
-      const data = encoder.encode(runnerToken)
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      const hashArray = Array.from(new Uint8Array(hashBuffer))
-      const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-
-      const { data: runner } = await supabase
-        .from('runners')
-        .select('id')
-        .eq('token_hash', tokenHash)
-        .maybeSingle()
-
-      if (!runner) {
-        return new Response(
-          JSON.stringify({ error: 'Runner not found' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Fetch pending orders for this runner
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('id, category, name, command, created_at')
-        .eq('runner_id', runner.id)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: true })
-        .limit(10)
-
-      if (ordersError) throw ordersError
-
-      return new Response(
-        JSON.stringify({ success: true, orders: orders || [] }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // POST /orders/report - Report order execution
-    if (req.method === 'POST' && path === '/orders/report') {
-      const runnerToken = req.headers.get('x-runner-token')
-      if (!runnerToken) {
-        return new Response(
-          JSON.stringify({ error: 'x-runner-token header required' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Verify runner
-      const encoder = new TextEncoder()
-      const data = encoder.encode(runnerToken)
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-      const hashArray = Array.from(new Uint8Array(hashBuffer))
-      const tokenHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-
-      const { data: runner } = await supabase
-        .from('runners')
-        .select('id')
-        .eq('token_hash', tokenHash)
-        .maybeSingle()
-
-      if (!runner) {
-        return new Response(
-          JSON.stringify({ error: 'Runner not found' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      const rawBody = await req.text()
-
-      const tryJson = (text: string) => {
-        try {
-          return JSON.parse(text)
-        } catch {
-          return null
-        }
-      }
-
-      // The runner should send JSON, but older scripts may send JS-like objects
-      // (e.g. {order_id:"...", status:"running"}) or urlencoded bodies.
-      let body: any = tryJson(rawBody)
-      let parseMethod = 'json'
-
-      if (!body && rawBody) {
-        // 1) Quote unquoted keys
-        // 2) Quote simple unquoted values (uuid/words) so JSON.parse can handle older runner payloads
-        let fixed = rawBody
-          .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":')
-          .replace(/:\s*([A-Za-z0-9_-]+)\s*(?=[,}])/g, (_m, v) => {
-            if (v === 'true' || v === 'false' || v === 'null') return `: ${v}`
-            if (/^-?\d+(?:\.\d+)?$/.test(v)) return `: ${v}`
-            return `: "${v}"`
-          })
-
-        body = tryJson(fixed)
-        if (body) parseMethod = 'fixed_json'
-      }
-
-      if (!body && rawBody) {
-        const params = new URLSearchParams(rawBody)
-        if (params.has('order_id') && params.has('status')) {
-          body = Object.fromEntries(params.entries())
-          if (typeof body.result === 'string') {
-            body.result = tryJson(body.result) ?? body.result
-          }
-          parseMethod = 'urlencoded'
-        }
-      }
-
-      if (!body) {
-        // Log the parse error to runner_logs
-        await supabase.from('runner_logs').insert({
-          runner_id: runner.id,
-          level: 'error',
-          event_type: 'report_parse_error',
-          message: 'Failed to parse /orders/report body',
-          raw_body: rawBody.slice(0, 5000),
-          error_details: 'Invalid JSON or unrecognized format',
-        })
-
-        console.error('Invalid /orders/report body:', rawBody.slice(0, 500))
-        return new Response(
-          JSON.stringify({ error: 'Invalid request body' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Log the successful report reception
-      await supabase.from('runner_logs').insert({
-        runner_id: runner.id,
-        level: 'info',
-        event_type: 'report_received',
-        message: `Report received: order=${body.order_id}, status=${body.status}`,
-        raw_body: rawBody.slice(0, 5000),
-        parsed_data: body,
-      })
-
-      const { order_id, status, result, error_message } = body
-
-      if (!order_id || !status) {
-        return new Response(
-          JSON.stringify({ error: 'order_id and status are required' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Update order status
-      const updateData: Record<string, unknown> = {
-        status,
-        result: result || {},
-      }
-
-      if (status === 'running') {
-        updateData.started_at = new Date().toISOString()
-      } else if (status === 'completed' || status === 'failed') {
-        updateData.completed_at = new Date().toISOString()
-      }
-
-      if (error_message) {
-        updateData.error_message = error_message
-      }
-
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update(updateData)
-        .eq('id', order_id)
-        .eq('runner_id', runner.id)
-
-      if (updateError) throw updateError
-
-      // If detection order completed, update infrastructure capabilities
-      if (status === 'completed' && result?.capabilities) {
-        const { data: order } = await supabase
-          .from('orders')
-          .select('infrastructure_id, category')
-          .eq('id', order_id)
-          .single()
-
-        if (order?.category === 'detection' && order?.infrastructure_id) {
-          const infraUpdate: Record<string, unknown> = {
-            capabilities: result.capabilities,
-          }
-
-          if (result.system) {
-            if (result.system.os) infraUpdate.os = result.system.os
-            if (result.system.architecture) infraUpdate.architecture = result.system.architecture
-            if (result.system.distribution) infraUpdate.distribution = result.system.distribution
-            if (result.system.cpu_cores) infraUpdate.cpu_cores = result.system.cpu_cores
-            if (result.system.ram_mb) infraUpdate.ram_gb = Math.round(result.system.ram_mb / 1024)
-            if (result.system.disk_gb) infraUpdate.disk_gb = result.system.disk_gb
-          }
-
-          await supabase
-            .from('infrastructures')
-            .update(infraUpdate)
-            .eq('id', order.infrastructure_id)
-        }
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, message: 'Report received' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // 404 for unknown routes
-    return new Response(
-      JSON.stringify({ error: 'Not found' }),
-      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-
-  } catch (error: unknown) {
-    console.error('Runner API error:', error)
-    const message = error instanceof Error ? error.message : 'Internal server error'
-    return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-})
+}
