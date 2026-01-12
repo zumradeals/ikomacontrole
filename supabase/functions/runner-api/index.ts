@@ -43,6 +43,55 @@ function determineOrderStatus(exitCode: number | null, reportedStatus: string): 
   return 'failed'
 }
 
+// Extract capabilities JSON from stdout (playbooks print {"capabilities":{...}})
+function extractCapabilitiesFromStdout(stdout: string): Record<string, string> | null {
+  if (!stdout) return null
+  
+  // Look for lines containing capabilities JSON
+  const lines = stdout.split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('{') && trimmed.includes('"capabilities"')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (parsed.capabilities && typeof parsed.capabilities === 'object') {
+          return parsed.capabilities as Record<string, string>
+        }
+      } catch {
+        continue
+      }
+    }
+  }
+  return null
+}
+
+// Extract system info from stdout (detection playbooks print {"system":{...}})
+function extractSystemInfoFromStdout(stdout: string): Record<string, unknown> | null {
+  if (!stdout) return null
+  
+  // Look for lines containing system JSON
+  const lines = stdout.split('\n')
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('{') && (trimmed.includes('"system"') || trimmed.includes('"os"') || trimmed.includes('"provider"'))) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        // Handle {"system":{...}} format
+        if (parsed.system && typeof parsed.system === 'object') {
+          return parsed.system as Record<string, unknown>
+        }
+        // Handle flat format {"os":"Linux","provider":"Contabo",...}
+        if (parsed.os || parsed.architecture || parsed.provider || parsed.cpu_cores) {
+          return parsed as Record<string, unknown>
+        }
+      } catch {
+        continue
+      }
+    }
+  }
+  return null
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -485,6 +534,35 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
       if (result?.capabilities && typeof result.capabilities === 'object') {
         updatedCapabilities = { ...updatedCapabilities, ...result.capabilities }
       }
+      
+      // 1b. Also try to extract capabilities from stdout_tail if result is empty
+      // Playbooks often print JSON like: {"capabilities":{"docker.installed":"installed"}}
+      const orderWithOutput = await supabase
+        .from('orders')
+        .select('stdout_tail')
+        .eq('id', order_id)
+        .single()
+      
+      if (orderWithOutput.data?.stdout_tail) {
+        const stdoutCapabilities = extractCapabilitiesFromStdout(orderWithOutput.data.stdout_tail)
+        if (stdoutCapabilities) {
+          updatedCapabilities = { ...updatedCapabilities, ...stdoutCapabilities }
+          console.log('Extracted capabilities from stdout:', stdoutCapabilities)
+        }
+        
+        // Also extract system info from stdout if present
+        const systemInfo = extractSystemInfoFromStdout(orderWithOutput.data.stdout_tail)
+        if (systemInfo) {
+          if (systemInfo.os) infraUpdate.os = systemInfo.os
+          if (systemInfo.architecture) infraUpdate.architecture = systemInfo.architecture
+          if (systemInfo.distribution) infraUpdate.distribution = systemInfo.distribution
+          if (systemInfo.cpu_cores) infraUpdate.cpu_cores = systemInfo.cpu_cores
+          if (systemInfo.ram_gb) infraUpdate.ram_gb = systemInfo.ram_gb
+          if (systemInfo.disk_gb) infraUpdate.disk_gb = systemInfo.disk_gb
+          if (systemInfo.provider) updatedCapabilities['provider'] = String(systemInfo.provider)
+          console.log('Extracted system info from stdout:', systemInfo)
+        }
+      }
 
       // 2. Extract playbook ID from description and mark its verifies as installed
       // Description format: "[playbook.id] description text"
@@ -792,14 +870,19 @@ poll_orders() {
         STATUS="applied"
         log "Order completed successfully (exit_code=0)"
         
-        # For detection orders, try to extract structured result
-        if [ "\$ORDER_CATEGORY" = "detection" ]; then
-          RESULT=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
-          if [ -n "\$RESULT" ] && echo "\$RESULT" | jq . >/dev/null 2>&1; then
-            send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
-          else
-            send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "{\"output\": \"Detection completed\"}"
-          fi
+        # Try to extract structured JSON result from stdout for ALL order categories
+        # Look for lines containing valid JSON objects (capabilities, system info, etc.)
+        RESULT=""
+        
+        # Try to find a JSON line that contains capabilities or system info
+        JSON_LINE=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
+        if [ -n "\$JSON_LINE" ] && echo "\$JSON_LINE" | jq . >/dev/null 2>&1; then
+          RESULT="\$JSON_LINE"
+          log "Extracted JSON result from stdout"
+        fi
+        
+        if [ -n "\$RESULT" ]; then
+          send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
         else
           send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
         fi
