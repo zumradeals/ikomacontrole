@@ -28,8 +28,9 @@ export function AppLayout({ children }: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="ml-60 min-h-screen">
-        <div className="p-6">
+      {/* Main content - responsive margins */}
+      <main className="min-h-screen pt-14 lg:pt-0 lg:ml-60">
+        <div className="p-4 lg:p-6">
           {children}
         </div>
       </main>
