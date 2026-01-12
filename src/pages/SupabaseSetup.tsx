@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Database, Globe, CheckCircle2, XCircle, AlertTriangle, Loader2, Shield, Key, Copy, Eye, EyeOff, RefreshCw, Play } from 'lucide-react';
+import { Database, Globe, CheckCircle2, XCircle, AlertTriangle, Loader2, Shield, Key, RefreshCw, Play } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { InfraSelector } from '@/components/platform/InfraSelector';
+import { SupabaseCredentials } from '@/components/platform/SupabaseCredentials';
 import { usePlatformServices } from '@/hooks/usePlatformServices';
 import { useCaddyRoutes, useHttpsReadyRoutes, useCreateCaddyRoute, useUpdateCaddyRoute, CaddyRoute } from '@/hooks/useCaddyRoutes';
 import { usePlatformInstances, useSupabaseInstance } from '@/hooks/usePlatformInstances';
@@ -30,7 +31,6 @@ const SupabaseSetup = () => {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [isVerifyingRoute, setIsVerifyingRoute] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
-  const [showCredentials, setShowCredentials] = useState<Record<string, boolean>>({});
   const [preflightChecks, setPreflightChecks] = useState<PreflightCheck[]>([
     { id: 'docker', label: 'Docker installé', status: 'pending' },
     { id: 'compose', label: 'Docker Compose installé', status: 'pending' },
@@ -274,51 +274,6 @@ echo "✅ Supabase installé avec succès"
       setIsInstalling(false);
     }
   };
-
-  const copyToClipboard = (value: string, label: string) => {
-    navigator.clipboard.writeText(value);
-    toast({
-      title: 'Copié',
-      description: `${label} copié dans le presse-papier`,
-    });
-  };
-
-  const toggleCredentialVisibility = (key: string) => {
-    setShowCredentials(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const renderCredentialRow = (label: string, value: string, key: string, isSensitive: boolean = false) => (
-    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border/50">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-muted-foreground">{label}</p>
-        <p className="font-mono text-sm truncate">
-          {isSensitive && !showCredentials[key] 
-            ? '••••••••••••••••' 
-            : value}
-        </p>
-      </div>
-      <div className="flex items-center gap-1 ml-2">
-        {isSensitive && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={() => toggleCredentialVisibility(key)}
-          >
-            {showCredentials[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => copyToClipboard(value, label)}
-        >
-          <Copy className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -697,44 +652,25 @@ echo "✅ Supabase installé avec succès"
 
             {/* Step 5: Credentials */}
             {currentStep === 'credentials' && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Key className="w-5 h-5" />
-                    Identifiants Supabase
-                  </CardTitle>
-                  <CardDescription>
-                    Vos identifiants de connexion Supabase
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Alert className="border-amber-500/50 bg-amber-500/10">
-                    <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    <AlertTitle>Important</AlertTitle>
-                    <AlertDescription>
-                      Conservez ces identifiants en lieu sûr. Certaines valeurs ne seront 
-                      affichées qu'une seule fois.
-                    </AlertDescription>
-                  </Alert>
+              <SupabaseCredentials
+                credentials={{
+                  supabase_url: supabaseInstance?.supabase_url || `https://${selectedRoute?.full_domain}`,
+                  supabase_anon_key: supabaseInstance?.supabase_anon_key,
+                  supabase_service_role_key: supabaseInstance?.supabase_service_role_key,
+                  supabase_jwt_secret: supabaseInstance?.supabase_jwt_secret,
+                  supabase_postgres_password: supabaseInstance?.supabase_postgres_password,
+                  studio_url: `${supabaseInstance?.supabase_url || `https://${selectedRoute?.full_domain}`}/studio`,
+                }}
+                showSecurityWarning
+              />
+            )}
 
-                  <Separator />
-
-                  <div className="space-y-3">
-                    {renderCredentialRow('Supabase URL', supabaseInstance?.supabase_url || `https://${selectedRoute?.full_domain}`, 'url', false)}
-                    {renderCredentialRow('Studio URL', `${supabaseInstance?.supabase_url || `https://${selectedRoute?.full_domain}`}/studio`, 'studio', false)}
-                    {renderCredentialRow('Anon Key', supabaseInstance?.supabase_anon_key || 'En attente...', 'anon', true)}
-                    {renderCredentialRow('Service Role Key', supabaseInstance?.supabase_service_role_key || 'En attente...', 'service', true)}
-                    {renderCredentialRow('JWT Secret', supabaseInstance?.supabase_jwt_secret || 'En attente...', 'jwt', true)}
-                    {renderCredentialRow('Postgres Password', supabaseInstance?.supabase_postgres_password || 'En attente...', 'postgres', true)}
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button onClick={() => window.location.href = '/platform'}>
-                      Retour à Platform
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+            {currentStep === 'credentials' && (
+              <div className="flex justify-end">
+                <Button onClick={() => window.location.href = '/platform'}>
+                  Retour à Platform
+                </Button>
+              </div>
             )}
           </div>
         </div>
