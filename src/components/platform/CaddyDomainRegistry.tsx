@@ -1,16 +1,8 @@
-import { useState } from 'react';
-import { Globe, Plus, Trash2, CheckCircle2, XCircle, Loader2, RefreshCw, ExternalLink } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Globe, Plus, Trash2, CheckCircle2, Loader2, RefreshCw, ExternalLink, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Table,
   TableBody,
@@ -37,6 +29,8 @@ import {
   CaddyRoute 
 } from '@/hooks/useCaddyRoutes';
 import { useCreateOrder } from '@/hooks/useOrders';
+import { useRunners } from '@/hooks/useRunners';
+import { CaddyRouteDialog, CaddyRouteSubmitData } from './CaddyRouteDialog';
 import { toast } from '@/hooks/use-toast';
 
 interface CaddyDomainRegistryProps {
@@ -47,68 +41,42 @@ interface CaddyDomainRegistryProps {
 
 export function CaddyDomainRegistry({ 
   infrastructureId, 
-  runnerId,
+  runnerId: providedRunnerId,
   onRouteCreated 
 }: CaddyDomainRegistryProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [deleteRoute, setDeleteRoute] = useState<CaddyRoute | null>(null);
-  const [newDomain, setNewDomain] = useState('');
-  const [newSubdomain, setNewSubdomain] = useState('');
-  const [newPort, setNewPort] = useState('3000');
   const [verifyingRouteId, setVerifyingRouteId] = useState<string | null>(null);
 
   const { data: routes = [], isLoading } = useCaddyRoutes(infrastructureId);
+  const { data: runners = [] } = useRunners();
   const createRoute = useCreateCaddyRoute();
   const deleteRouteMutation = useDeleteCaddyRoute();
   const updateRoute = useUpdateCaddyRoute();
   const createOrder = useCreateOrder();
 
-  const handleCreateRoute = async () => {
-    if (!infrastructureId || !newDomain) return;
-
-    try {
-      const route = await createRoute.mutateAsync({
-        infrastructure_id: infrastructureId,
-        domain: newDomain,
-        subdomain: newSubdomain || null,
-        backend_port: parseInt(newPort) || 3000,
-      });
-
-      setIsAddDialogOpen(false);
-      setNewDomain('');
-      setNewSubdomain('');
-      setNewPort('3000');
-      onRouteCreated?.(route);
-    } catch (error) {
-      // Error handled by mutation
+  // Trouver un runner actif pour cette infrastructure
+  const activeRunner = useMemo(() => {
+    if (providedRunnerId) {
+      const runner = runners.find(r => r.id === providedRunnerId);
+      return runner?.status === 'online' ? runner : null;
     }
-  };
+    // Trouver le premier runner online associé à cette infrastructure
+    return runners.find(r => 
+      r.infrastructure_id === infrastructureId && 
+      r.status === 'online'
+    ) || null;
+  }, [runners, providedRunnerId, infrastructureId]);
 
-  const handleVerifyRoute = async (route: CaddyRoute) => {
-    if (!runnerId) {
-      toast({
-        title: 'Erreur',
-        description: 'Aucun runner associé',
-        variant: 'destructive',
-      });
-      return;
-    }
+  const hasActiveRunner = !!activeRunner;
 
-    setVerifyingRouteId(route.id);
-    
-    try {
-      // Update status to provisioning
-      await updateRoute.mutateAsync({
-        id: route.id,
-        https_status: 'provisioning',
-      });
-
-      // Create Caddy configuration order
-      const command = `#!/bin/bash
+  // Générer le script Caddy pour un domaine
+  const generateCaddyScript = (fullDomain: string, backendUrl: string) => {
+    return `#!/bin/bash
 set -e
 
-DOMAIN="${route.full_domain}"
-BACKEND="${route.backend_protocol}://${route.backend_host}:${route.backend_port}"
+DOMAIN="${fullDomain}"
+BACKEND="${backendUrl}"
 
 echo "=== Configuration Caddy: $DOMAIN ==="
 
@@ -155,14 +123,118 @@ else
   echo "HTTPS_STATUS=provisioning"
 fi
 `;
+  };
 
+  const handleCreateRoute = async (data: CaddyRouteSubmitData) => {
+    if (!infrastructureId) {
+      toast({
+        title: 'Erreur',
+        description: 'Aucune infrastructure sélectionnée',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!activeRunner) {
+      toast({
+        title: 'Erreur',
+        description: 'Aucun runner actif disponible pour exécuter la configuration',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const backendUrl = `${data.backend_protocol}://${data.backend_host}:${data.backend_port}`;
+
+    try {
+      // Créer les routes selon le type de routage
+      const routesToCreate: Array<{ domain: string; subdomain: string | null }> = [];
+
+      switch (data.routing_type) {
+        case 'root_only':
+          routesToCreate.push({ domain: data.domain, subdomain: null });
+          break;
+        case 'subdomain_only':
+          routesToCreate.push({ domain: data.domain, subdomain: data.subdomain || null });
+          break;
+        case 'root_and_subdomain':
+          routesToCreate.push({ domain: data.domain, subdomain: null });
+          routesToCreate.push({ domain: data.domain, subdomain: data.subdomain || null });
+          break;
+      }
+
+      for (const routeData of routesToCreate) {
+        // Créer la route en base
+        const route = await createRoute.mutateAsync({
+          infrastructure_id: infrastructureId,
+          domain: routeData.domain,
+          subdomain: routeData.subdomain,
+          backend_host: data.backend_host,
+          backend_port: data.backend_port,
+          backend_protocol: data.backend_protocol,
+        });
+
+        // Créer l'ordre de configuration Caddy avec runner_id et infrastructure_id explicites
+        const fullDomain = routeData.subdomain 
+          ? `${routeData.subdomain}.${routeData.domain}` 
+          : routeData.domain;
+
+        await createOrder.mutateAsync({
+          runner_id: activeRunner.id,
+          infrastructure_id: infrastructureId,
+          category: 'installation',
+          name: `Caddy: Configurer ${fullDomain}`,
+          description: `[proxy.caddy.configure] Configuration reverse proxy ${fullDomain}`,
+          command: generateCaddyScript(fullDomain, backendUrl),
+        });
+
+        // Mettre à jour le statut de provisioning
+        await updateRoute.mutateAsync({
+          id: route.id,
+          https_status: 'provisioning',
+        });
+
+        onRouteCreated?.(route);
+      }
+
+      toast({
+        title: 'Routes créées',
+        description: `${routesToCreate.length} route(s) envoyée(s) au runner ${activeRunner.name}`,
+      });
+    } catch (error) {
+      // Errors handled by mutations
+    }
+  };
+
+  const handleVerifyRoute = async (route: CaddyRoute) => {
+    if (!activeRunner) {
+      toast({
+        title: 'Erreur',
+        description: 'Aucun runner actif. Impossible d\'exécuter la configuration.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setVerifyingRouteId(route.id);
+    
+    try {
+      // Update status to provisioning
+      await updateRoute.mutateAsync({
+        id: route.id,
+        https_status: 'provisioning',
+      });
+
+      const backendUrl = `${route.backend_protocol}://${route.backend_host}:${route.backend_port}`;
+
+      // Create Caddy configuration order avec références explicites
       await createOrder.mutateAsync({
-        runner_id: runnerId,
+        runner_id: activeRunner.id,
         infrastructure_id: infrastructureId,
         category: 'installation',
         name: `Caddy: Configurer ${route.full_domain}`,
         description: `[proxy.caddy.configure] Configuration reverse proxy ${route.full_domain}`,
-        command,
+        command: generateCaddyScript(route.full_domain, backendUrl),
       });
 
       // Simulate verification (in production, poll order status)
@@ -241,69 +313,32 @@ fi
             Domaines et sous-domaines configurés sur cette infrastructure
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="w-4 h-4 mr-2" />
-              Ajouter un domaine
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Ajouter un domaine</DialogTitle>
-              <DialogDescription>
-                Configurez un nouveau domaine ou sous-domaine pour Caddy
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Domaine racine</label>
-                <Input
-                  placeholder="example.com"
-                  value={newDomain}
-                  onChange={(e) => setNewDomain(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Sous-domaine (optionnel)</label>
-                <Input
-                  placeholder="app, api, supabase..."
-                  value={newSubdomain}
-                  onChange={(e) => setNewSubdomain(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Résultat: {newSubdomain ? `${newSubdomain}.` : ''}{newDomain || 'example.com'}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Port backend</label>
-                <Input
-                  type="number"
-                  placeholder="3000"
-                  value={newPort}
-                  onChange={(e) => setNewPort(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                Annuler
-              </Button>
-              <Button 
-                onClick={handleCreateRoute}
-                disabled={!newDomain || createRoute.isPending}
-              >
-                {createRoute.isPending ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Plus className="w-4 h-4 mr-2" />
-                )}
-                Ajouter
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button size="sm" onClick={() => setIsAddDialogOpen(true)}>
+          <Plus className="w-4 h-4 mr-2" />
+          Ajouter un domaine
+        </Button>
       </div>
+
+      {/* Warning si pas de runner actif */}
+      {!hasActiveRunner && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Aucun runner actif sur cette infrastructure.</strong>{' '}
+            Les ordres Caddy ne peuvent pas être exécutés sans runner en ligne.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Info runner actif */}
+      {hasActiveRunner && (
+        <Alert className="border-green-500/30 bg-green-500/5">
+          <CheckCircle2 className="h-4 w-4 text-green-500" />
+          <AlertDescription className="text-sm">
+            Runner actif: <strong>{activeRunner.name}</strong> — Les ordres seront exécutés sur ce runner.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Routes Table */}
       {isLoading ? (
@@ -360,8 +395,8 @@ fi
                         variant="ghost"
                         size="icon"
                         onClick={() => handleVerifyRoute(route)}
-                        disabled={verifyingRouteId === route.id || route.https_status === 'ok'}
-                        title="Vérifier / Configurer HTTPS"
+                        disabled={verifyingRouteId === route.id || route.https_status === 'ok' || !hasActiveRunner}
+                        title={!hasActiveRunner ? 'Aucun runner actif' : 'Vérifier / Configurer HTTPS'}
                       >
                         {verifyingRouteId === route.id ? (
                           <Loader2 className="w-4 h-4 animate-spin" />
@@ -388,6 +423,15 @@ fi
           </Table>
         </div>
       )}
+
+      {/* Add Dialog */}
+      <CaddyRouteDialog
+        open={isAddDialogOpen}
+        onOpenChange={setIsAddDialogOpen}
+        onSubmit={handleCreateRoute}
+        isLoading={createRoute.isPending}
+        hasActiveRunner={hasActiveRunner}
+      />
 
       {/* Delete Confirmation */}
       <AlertDialog open={!!deleteRoute} onOpenChange={() => setDeleteRoute(null)}>
