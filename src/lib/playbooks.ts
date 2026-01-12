@@ -1777,81 +1777,76 @@ generate_secret() {
   openssl rand -base64 32 | tr -d '\\n/+=' | head -c 32
 }
 
-generate_jwt() {
+generate_jwt_secret() {
   openssl rand -base64 64 | tr -d '\\n/+=' | head -c 64
 }
 
-# Copy example if .env doesn't exist
-if [ ! -f .env ]; then
-  cp .env.example .env 2>/dev/null || touch .env
+# IMPORTANT: Start from .env.example to get all required variables
+if [ -f .env.example ]; then
+  cp .env.example .env
+  echo "✓ Copied .env.example as base"
+else
+  echo "✗ .env.example not found!"
+  exit 1
 fi
 
 # Generate secrets
-JWT_SECRET=\$(generate_jwt)
+JWT_SECRET=\$(generate_jwt_secret)
 ANON_KEY=\$(generate_secret)
 SERVICE_ROLE_KEY=\$(generate_secret)
 POSTGRES_PASSWORD=\$(generate_secret)
 DASHBOARD_PASSWORD=\$(generate_secret)
+SECRET_KEY_BASE=\$(generate_jwt_secret)
+VAULT_ENC_KEY=\$(generate_secret)
+PG_META_CRYPTO_KEY=\$(generate_secret)
+LOGFLARE_API_KEY=\$(generate_secret)
 
 # Determine site URL
 if [ "\$NETWORK_MODE" = "public" ] && [ -n "\$DOMAIN" ]; then
   SITE_URL="https://\$DOMAIN"
   API_EXTERNAL_URL="https://\$DOMAIN"
-  STUDIO_URL="https://studio.\$DOMAIN"
 else
   SITE_URL="http://localhost:3000"
   API_EXTERNAL_URL="http://localhost:8000"
-  STUDIO_URL="http://localhost:3000"
 fi
 
-# Update .env file
-cat > .env << EOF
-############
-# Secrets - AUTO-GENERATED - DO NOT COMMIT
-############
-POSTGRES_PASSWORD=\$POSTGRES_PASSWORD
-JWT_SECRET=\$JWT_SECRET
-ANON_KEY=\$ANON_KEY
-SERVICE_ROLE_KEY=\$SERVICE_ROLE_KEY
-DASHBOARD_USERNAME=supabase
-DASHBOARD_PASSWORD=\$DASHBOARD_PASSWORD
+# Update secrets in .env file using sed (in-place replacement)
+sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=\$POSTGRES_PASSWORD|" .env
+sed -i "s|^JWT_SECRET=.*|JWT_SECRET=\$JWT_SECRET|" .env
+sed -i "s|^ANON_KEY=.*|ANON_KEY=\$ANON_KEY|" .env
+sed -i "s|^SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=\$SERVICE_ROLE_KEY|" .env
+sed -i "s|^DASHBOARD_PASSWORD=.*|DASHBOARD_PASSWORD=\$DASHBOARD_PASSWORD|" .env
+sed -i "s|^SITE_URL=.*|SITE_URL=\$SITE_URL|" .env
+sed -i "s|^API_EXTERNAL_URL=.*|API_EXTERNAL_URL=\$API_EXTERNAL_URL|" .env
+sed -i "s|^SUPABASE_PUBLIC_URL=.*|SUPABASE_PUBLIC_URL=\$API_EXTERNAL_URL|" .env
 
-############
-# URLs
-############
-SITE_URL=\$SITE_URL
-API_EXTERNAL_URL=\$API_EXTERNAL_URL
-SUPABASE_PUBLIC_URL=\$API_EXTERNAL_URL
+# Add missing variables that cause docker compose warnings
+grep -q "^SECRET_KEY_BASE=" .env || echo "SECRET_KEY_BASE=\$SECRET_KEY_BASE" >> .env
+grep -q "^VAULT_ENC_KEY=" .env || echo "VAULT_ENC_KEY=\$VAULT_ENC_KEY" >> .env
+grep -q "^PG_META_CRYPTO_KEY=" .env || echo "PG_META_CRYPTO_KEY=\$PG_META_CRYPTO_KEY" >> .env
+grep -q "^LOGFLARE_API_KEY=" .env || echo "LOGFLARE_API_KEY=\$LOGFLARE_API_KEY" >> .env
+grep -q "^LOGFLARE_PUBLIC_ACCESS_TOKEN=" .env || echo "LOGFLARE_PUBLIC_ACCESS_TOKEN=\$LOGFLARE_API_KEY" >> .env
+grep -q "^LOGFLARE_PRIVATE_ACCESS_TOKEN=" .env || echo "LOGFLARE_PRIVATE_ACCESS_TOKEN=\$LOGFLARE_API_KEY" >> .env
+grep -q "^JWT_EXPIRY=" .env || echo "JWT_EXPIRY=3600" >> .env
+grep -q "^PGRST_DB_SCHEMAS=" .env || echo "PGRST_DB_SCHEMAS=public,storage,graphql_public" >> .env
+grep -q "^IMGPROXY_ENABLE_WEBP_DETECTION=" .env || echo "IMGPROXY_ENABLE_WEBP_DETECTION=true" >> .env
+grep -q "^FUNCTIONS_VERIFY_JWT=" .env || echo "FUNCTIONS_VERIFY_JWT=false" >> .env
+grep -q "^DOCKER_SOCKET_LOCATION=" .env || echo "DOCKER_SOCKET_LOCATION=/var/run/docker.sock" >> .env
+grep -q "^POOLER_DEFAULT_POOL_SIZE=" .env || echo "POOLER_DEFAULT_POOL_SIZE=20" >> .env
+grep -q "^POOLER_MAX_CLIENT_CONN=" .env || echo "POOLER_MAX_CLIENT_CONN=100" >> .env
+grep -q "^POOLER_DB_POOL_SIZE=" .env || echo "POOLER_DB_POOL_SIZE=20" >> .env
+grep -q "^POOLER_TENANT_ID=" .env || echo "POOLER_TENANT_ID=\$INSTANCE_NAME" >> .env
+grep -q "^POOLER_PROXY_PORT_TRANSACTION=" .env || echo "POOLER_PROXY_PORT_TRANSACTION=6543" >> .env
 
-############
-# Studio
-############
-STUDIO_DEFAULT_ORGANIZATION=Ikoma
-STUDIO_DEFAULT_PROJECT=supabase-\$INSTANCE_NAME
-STUDIO_PORT=3000
+# Custom ikoma variables
+echo "" >> .env
+echo "# Ikoma instance config" >> .env
+echo "INSTANCE_NAME=\$INSTANCE_NAME" >> .env
+echo "NETWORK_MODE=\$NETWORK_MODE" >> .env
+[ -n "\$DOMAIN" ] && echo "DOMAIN=\$DOMAIN" >> .env
 
-############
-# Database
-############
-POSTGRES_HOST=db
-POSTGRES_DB=postgres
-POSTGRES_PORT=5432
-
-############
-# API
-############
-KONG_HTTP_PORT=8000
-KONG_HTTPS_PORT=8443
-
-############
-# Instance
-############
-INSTANCE_NAME=\$INSTANCE_NAME
-NETWORK_MODE=\$NETWORK_MODE
-DOMAIN=\$DOMAIN
-EOF
-
-echo "✓ Environment configured"
+echo ""
+echo "✓ Environment configured with all required variables"
 echo ""
 echo "Generated credentials (save securely):"
 echo "  Dashboard: supabase / \$DASHBOARD_PASSWORD"
