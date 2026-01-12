@@ -10,7 +10,8 @@ import {
   Loader2,
   Clock,
   Settings,
-  Route
+  Route,
+  ExternalLink
 } from 'lucide-react';
 import { PlatformService, ServiceStatus } from '@/hooks/usePlatformServices';
 
@@ -21,6 +22,7 @@ interface ServiceCardProps {
   onViewLogs?: () => void;
   onRefresh?: () => void;
   onConfigure?: () => void;
+  onSetup?: () => void;
   disabled?: boolean;
   isLoading?: boolean;
 }
@@ -74,6 +76,7 @@ export function ServiceCard({
   onViewLogs,
   onRefresh,
   onConfigure,
+  onSetup,
   disabled = false,
   isLoading = false,
 }: ServiceCardProps) {
@@ -134,7 +137,18 @@ export function ServiceCard({
           </Button>
         )}
         
-        {canInstall && (
+        {canInstall && service.id === 'supabase' && (
+          <Button
+            size="sm"
+            onClick={onInstall}
+            disabled={disabled || isLoading}
+          >
+            <ExternalLink className="w-3 h-3 mr-1.5" />
+            Configuration guidée
+          </Button>
+        )}
+        
+        {canInstall && service.id !== 'supabase' && (
           <Button
             size="sm"
             onClick={onInstall}
