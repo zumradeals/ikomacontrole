@@ -14,6 +14,184 @@ export type Database = {
   }
   public: {
     Tables: {
+      deployment_steps: {
+        Row: {
+          command: string
+          created_at: string
+          deployment_id: string
+          error_message: string | null
+          exit_code: number | null
+          finished_at: string | null
+          id: string
+          order_id: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["deployment_step_status"]
+          stderr_tail: string | null
+          stdout_tail: string | null
+          step_name: string
+          step_order: number
+          step_type: Database["public"]["Enums"]["deployment_step_type"]
+          updated_at: string
+        }
+        Insert: {
+          command: string
+          created_at?: string
+          deployment_id: string
+          error_message?: string | null
+          exit_code?: number | null
+          finished_at?: string | null
+          id?: string
+          order_id?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["deployment_step_status"]
+          stderr_tail?: string | null
+          stdout_tail?: string | null
+          step_name: string
+          step_order: number
+          step_type: Database["public"]["Enums"]["deployment_step_type"]
+          updated_at?: string
+        }
+        Update: {
+          command?: string
+          created_at?: string
+          deployment_id?: string
+          error_message?: string | null
+          exit_code?: number | null
+          finished_at?: string | null
+          id?: string
+          order_id?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["deployment_step_status"]
+          stderr_tail?: string | null
+          stdout_tail?: string | null
+          step_name?: string
+          step_order?: number
+          step_type?: Database["public"]["Enums"]["deployment_step_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deployment_steps_deployment_id_fkey"
+            columns: ["deployment_id"]
+            isOneToOne: false
+            referencedRelation: "deployments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deployment_steps_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      deployments: {
+        Row: {
+          app_name: string
+          branch: string
+          completed_at: string | null
+          config: Json
+          created_at: string
+          created_by: string | null
+          current_step: string | null
+          deploy_type: Database["public"]["Enums"]["deployment_type"]
+          domain: string | null
+          env_vars: Json | null
+          error_message: string | null
+          expose_via_caddy: boolean | null
+          healthcheck_type: Database["public"]["Enums"]["healthcheck_type"]
+          healthcheck_value: string | null
+          id: string
+          infrastructure_id: string | null
+          port: number | null
+          repo_url: string
+          rolled_back_from: string | null
+          runner_id: string
+          start_command: string | null
+          started_at: string | null
+          status: Database["public"]["Enums"]["deployment_status"]
+          updated_at: string
+          working_dir: string | null
+        }
+        Insert: {
+          app_name: string
+          branch?: string
+          completed_at?: string | null
+          config?: Json
+          created_at?: string
+          created_by?: string | null
+          current_step?: string | null
+          deploy_type?: Database["public"]["Enums"]["deployment_type"]
+          domain?: string | null
+          env_vars?: Json | null
+          error_message?: string | null
+          expose_via_caddy?: boolean | null
+          healthcheck_type?: Database["public"]["Enums"]["healthcheck_type"]
+          healthcheck_value?: string | null
+          id?: string
+          infrastructure_id?: string | null
+          port?: number | null
+          repo_url: string
+          rolled_back_from?: string | null
+          runner_id: string
+          start_command?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["deployment_status"]
+          updated_at?: string
+          working_dir?: string | null
+        }
+        Update: {
+          app_name?: string
+          branch?: string
+          completed_at?: string | null
+          config?: Json
+          created_at?: string
+          created_by?: string | null
+          current_step?: string | null
+          deploy_type?: Database["public"]["Enums"]["deployment_type"]
+          domain?: string | null
+          env_vars?: Json | null
+          error_message?: string | null
+          expose_via_caddy?: boolean | null
+          healthcheck_type?: Database["public"]["Enums"]["healthcheck_type"]
+          healthcheck_value?: string | null
+          id?: string
+          infrastructure_id?: string | null
+          port?: number | null
+          repo_url?: string
+          rolled_back_from?: string | null
+          runner_id?: string
+          start_command?: string | null
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["deployment_status"]
+          updated_at?: string
+          working_dir?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deployments_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deployments_rolled_back_from_fkey"
+            columns: ["rolled_back_from"]
+            isOneToOne: false
+            referencedRelation: "deployments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deployments_runner_id_fkey"
+            columns: ["runner_id"]
+            isOneToOne: false
+            referencedRelation: "runners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       infrastructures: {
         Row: {
           architecture: string | null
@@ -325,6 +503,35 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
+      deployment_status:
+        | "draft"
+        | "planning"
+        | "ready"
+        | "running"
+        | "applied"
+        | "failed"
+        | "rolled_back"
+      deployment_step_status:
+        | "pending"
+        | "running"
+        | "applied"
+        | "failed"
+        | "skipped"
+      deployment_step_type:
+        | "clone_repo"
+        | "checkout"
+        | "env_write"
+        | "install_deps"
+        | "build"
+        | "start"
+        | "healthcheck"
+        | "expose"
+        | "finalize"
+        | "stop"
+        | "rollback"
+        | "custom"
+      deployment_type: "nodejs" | "docker_compose" | "static_site" | "custom"
+      healthcheck_type: "http" | "tcp" | "command"
       infra_type: "vps" | "bare_metal" | "cloud"
       order_category:
         | "installation"
@@ -460,6 +667,38 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      deployment_status: [
+        "draft",
+        "planning",
+        "ready",
+        "running",
+        "applied",
+        "failed",
+        "rolled_back",
+      ],
+      deployment_step_status: [
+        "pending",
+        "running",
+        "applied",
+        "failed",
+        "skipped",
+      ],
+      deployment_step_type: [
+        "clone_repo",
+        "checkout",
+        "env_write",
+        "install_deps",
+        "build",
+        "start",
+        "healthcheck",
+        "expose",
+        "finalize",
+        "stop",
+        "rollback",
+        "custom",
+      ],
+      deployment_type: ["nodejs", "docker_compose", "static_site", "custom"],
+      healthcheck_type: ["http", "tcp", "command"],
       infra_type: ["vps", "bare_metal", "cloud"],
       order_category: [
         "installation",
