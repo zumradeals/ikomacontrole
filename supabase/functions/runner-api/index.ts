@@ -461,20 +461,81 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
     throw updateError
   }
 
-  // If detection order completed, update infrastructure capabilities
-  if (finalStatus === 'completed' && result?.capabilities) {
+  // Auto-update infrastructure capabilities on successful order
+  if (finalStatus === 'completed') {
     const { data: order } = await supabase
       .from('orders')
-      .select('infrastructure_id, category')
+      .select('infrastructure_id, category, description')
       .eq('id', order_id)
       .single()
 
-    if (order?.category === 'detection' && order?.infrastructure_id) {
-      const infraUpdate: Record<string, unknown> = {
-        capabilities: result.capabilities,
+    if (order?.infrastructure_id) {
+      // Get current infrastructure capabilities
+      const { data: infra } = await supabase
+        .from('infrastructures')
+        .select('capabilities')
+        .eq('id', order.infrastructure_id)
+        .single()
+
+      const currentCapabilities = (infra?.capabilities || {}) as Record<string, string>
+      let updatedCapabilities = { ...currentCapabilities }
+      const infraUpdate: Record<string, unknown> = {}
+
+      // 1. If result contains explicit capabilities, merge them
+      if (result?.capabilities && typeof result.capabilities === 'object') {
+        updatedCapabilities = { ...updatedCapabilities, ...result.capabilities }
       }
 
-      if (result.system) {
+      // 2. Extract playbook ID from description and mark its verifies as installed
+      // Description format: "[playbook.id] description text"
+      const playbookMatch = order.description?.match(/^\[([a-z0-9_.]+)\]/)
+      if (playbookMatch) {
+        const playbookId = playbookMatch[1]
+        // Playbook verifies mapping (server-side copy of what the playbook verifies)
+        const PLAYBOOK_VERIFIES: Record<string, string[]> = {
+          'system.info': ['system.detected'],
+          'system.update': ['system.updated'],
+          'system.packages.base': ['curl.installed', 'wget.installed', 'git.installed', 'jq.installed'],
+          'system.timezone.set': ['timezone.configured'],
+          'system.swap.ensure': ['swap.configured'],
+          'net.dns.check': ['dns.working'],
+          'firewall.ufw.baseline': ['firewall.configured'],
+          'ssh.hardening': ['ssh.hardened'],
+          'fail2ban.install': ['fail2ban.installed'],
+          'runtime.node.install_lts': ['node.installed', 'npm.installed'],
+          'runtime.node.verify': ['node.verified'],
+          'runtime.python.install': ['python.installed'],
+          'runtime.pm2.install': ['pm2.installed'],
+          'docker.install_engine': ['docker.installed'],
+          'docker.install_compose': ['docker.compose.installed'],
+          'docker.postinstall': ['docker.usermod'],
+          'docker.verify': ['docker.verified'],
+          'proxy.caddy.install': ['caddy.installed'],
+          'proxy.caddy.verify': ['caddy.verified'],
+          'proxy.nginx.install': ['nginx.installed'],
+          'tls.acme.precheck': ['acme.ready'],
+          'monitor.prometheus.install': ['prometheus.installed'],
+          'monitor.node_exporter.install': ['node_exporter.installed'],
+          'monitor.grafana.install': ['grafana.installed'],
+          'supabase.precheck': ['supabase.prerequisites_ok'],
+          'supabase.install_cli': ['supabase.cli_installed'],
+          'supabase.selfhost.up': ['supabase.running'],
+          'supabase.selfhost.healthcheck': ['supabase.healthy'],
+          'maintenance.cleanup': ['cleanup.done'],
+          'maintenance.logs.rotate': ['logs.rotated'],
+        }
+
+        const verifies = PLAYBOOK_VERIFIES[playbookId]
+        if (verifies) {
+          for (const cap of verifies) {
+            updatedCapabilities[cap] = 'installed'
+          }
+          console.log(`Playbook ${playbookId} completed: marked ${verifies.join(', ')} as installed`)
+        }
+      }
+
+      // 3. If detection category with system info, update infrastructure specs
+      if (result?.system) {
         if (result.system.os) infraUpdate.os = result.system.os
         if (result.system.architecture) infraUpdate.architecture = result.system.architecture
         if (result.system.distribution) infraUpdate.distribution = result.system.distribution
@@ -483,10 +544,22 @@ async function handleOrdersReport(req: Request, supabase: any): Promise<Response
         if (result.system.disk_gb) infraUpdate.disk_gb = result.system.disk_gb
       }
 
+      // Apply capabilities update
+      infraUpdate.capabilities = updatedCapabilities
+
       await supabase
         .from('infrastructures')
         .update(infraUpdate)
         .eq('id', order.infrastructure_id)
+
+      // Log capability update
+      await supabase.from('runner_logs').insert({
+        runner_id: runner.id,
+        level: 'info',
+        event_type: 'capabilities_updated',
+        message: `Infrastructure capabilities updated after order ${order_id}`,
+        parsed_data: { updated_capabilities: updatedCapabilities },
+      })
     }
   }
 
