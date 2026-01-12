@@ -148,7 +148,7 @@ const Infra = () => {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
       <PageHeader
         title="Infrastructure"
         description="Registre des capacités serveur"
@@ -156,12 +156,12 @@ const Infra = () => {
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => refetch()}>
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Rafraîchir
+              <RefreshCw className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Rafraîchir</span>
             </Button>
             <Button size="sm" onClick={handleCreate}>
-              <Plus className="w-4 h-4 mr-2" />
-              Déclarer une infrastructure
+              <Plus className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Déclarer</span>
             </Button>
           </div>
         }

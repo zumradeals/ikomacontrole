@@ -160,19 +160,19 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={onBack}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
             <ArrowLeft className="w-5 h-5" />
           </Button>
-          <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
-            <TypeIcon className="w-6 h-6 text-primary" />
+          <div className="p-2 sm:p-3 rounded-xl bg-primary/10 border border-primary/20 shrink-0">
+            <TypeIcon className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
           </div>
-          <div>
-            <h1 className="text-2xl font-bold">{infrastructure.name}</h1>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-2xl font-bold truncate">{infrastructure.name}</h1>
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground flex-wrap">
               <span>{typeLabels[infrastructure.type]}</span>
               {infrastructure.os && (
                 <>
@@ -182,96 +182,100 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
               )}
               {infrastructure.architecture && (
                 <>
-                  <span>•</span>
-                  <span>{infrastructure.architecture}</span>
+                  <span className="hidden sm:inline">•</span>
+                  <span className="hidden sm:inline">{infrastructure.architecture}</span>
                 </>
               )}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Actions - scrollable on mobile */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
           <Button 
             variant="outline" 
             size="sm"
             onClick={() => setAutoDetectDialogOpen(true)}
             disabled={associatedRunners.length === 0}
+            className="shrink-0"
           >
-            <Scan className="w-4 h-4 mr-2" />
-            Auto-détection
+            <Scan className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Auto-détection</span>
           </Button>
           <Button 
             variant="outline" 
             size="sm"
             onClick={() => setOrdersDialogOpen(true)}
             disabled={associatedRunners.length === 0}
+            className="shrink-0"
           >
-            <Terminal className="w-4 h-4 mr-2" />
-            Ordres système
+            <Terminal className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Ordres système</span>
           </Button>
           <Button 
             variant="outline" 
             size="sm"
             onClick={() => setCustomOrderDialogOpen(true)}
             disabled={associatedRunners.length === 0}
+            className="shrink-0"
           >
-            <Code className="w-4 h-4 mr-2" />
-            Commande custom
+            <Code className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Custom</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            <Pencil className="w-4 h-4 mr-2" />
-            Modifier
+          <Button variant="outline" size="sm" onClick={onEdit} className="shrink-0">
+            <Pencil className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Modifier</span>
           </Button>
-          <Button variant="outline" size="sm" onClick={onDelete} className="text-destructive hover:text-destructive">
-            <Trash2 className="w-4 h-4 mr-2" />
-            Supprimer
+          <Button variant="outline" size="sm" onClick={onDelete} className="text-destructive hover:text-destructive shrink-0">
+            <Trash2 className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Supprimer</span>
           </Button>
         </div>
       </div>
 
       {/* Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6">
           {/* Resources Section */}
-          <section className="glass-panel rounded-xl p-6">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+          <section className="glass-panel rounded-xl p-4 sm:p-6">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 sm:mb-4">
               Ressources
             </h2>
-            <div className="grid grid-cols-4 gap-6">
-              <div className="flex items-center gap-3">
-                <Cpu className="w-5 h-5 text-muted-foreground" />
-                <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <Cpu className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">CPU</p>
-                  <p className="font-medium">
-                    {infrastructure.cpu_cores ? `${infrastructure.cpu_cores} cores` : 'Non spécifié'}
+                  <p className="font-medium text-sm sm:text-base truncate">
+                    {infrastructure.cpu_cores ? `${infrastructure.cpu_cores} cores` : '—'}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <MemoryStick className="w-5 h-5 text-muted-foreground" />
-                <div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <MemoryStick className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">RAM</p>
-                  <p className="font-medium">
-                    {infrastructure.ram_gb ? `${infrastructure.ram_gb} Go` : 'Non spécifié'}
+                  <p className="font-medium text-sm sm:text-base truncate">
+                    {infrastructure.ram_gb ? `${infrastructure.ram_gb} Go` : '—'}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <HardDriveIcon className="w-5 h-5 text-muted-foreground" />
-                <div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <HardDriveIcon className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Disque</p>
-                  <p className="font-medium">
-                    {infrastructure.disk_gb ? `${infrastructure.disk_gb} Go` : 'Non spécifié'}
+                  <p className="font-medium text-sm sm:text-base truncate">
+                    {infrastructure.disk_gb ? `${infrastructure.disk_gb} Go` : '—'}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <MapPin className="w-5 h-5 text-muted-foreground" />
-                <div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <MapPin className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground shrink-0" />
+                <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Localisation</p>
-                  <p className="font-medium">
-                    {(caps.location as string) || 'Non spécifié'}
+                  <p className="font-medium text-sm sm:text-base truncate">
+                    {(caps.location as string) || '—'}
                   </p>
                 </div>
               </div>
@@ -279,49 +283,49 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
           </section>
 
           {/* Capabilities Section */}
-          <section className="glass-panel rounded-xl p-6">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">
+          <section className="glass-panel rounded-xl p-4 sm:p-6">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 sm:mb-4">
               Capacités
             </h2>
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
               <CapabilityCard
-                icon={<GitBranch className="w-5 h-5" />}
+                icon={<GitBranch className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="Git"
                 sublabel="Déclaré"
                 available={getCapValue('git')}
               />
               <CapabilityCard
-                icon={<Container className="w-5 h-5" />}
+                icon={<Container className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="Docker"
                 sublabel="Déclaré"
                 available={getCapValue('docker')}
               />
               <CapabilityCard
-                icon={<Shield className="w-5 h-5" />}
+                icon={<Shield className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="Accès root"
                 sublabel="Déclaré"
                 available={getCapValue('root_access')}
               />
               <CapabilityCard
-                icon={<Container className="w-5 h-5" />}
+                icon={<Container className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="Docker Compose"
                 sublabel="Déclaré"
                 available={getCapValue('docker_compose')}
               />
               <CapabilityCard
-                icon={<Lock className="w-5 h-5" />}
+                icon={<Lock className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="HTTPS possible"
                 sublabel="Déclaré"
                 available={getCapValue('https_possible')}
               />
               <CapabilityCard
-                icon={<Network className="w-5 h-5" />}
+                icon={<Network className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="Ports exposables"
                 sublabel="Déclaré"
                 available={getCapValue('exposable_ports')}
               />
               <CapabilityCard
-                icon={<Globe className="w-5 h-5" />}
+                icon={<Globe className="w-4 h-4 sm:w-5 sm:h-5" />}
                 label="Accès Internet sortant"
                 sublabel="Déclaré"
                 available={getCapValue('internet_access')}

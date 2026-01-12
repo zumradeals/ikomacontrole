@@ -45,49 +45,49 @@ const Runner = () => {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in">
       <PageHeader
         title="Runners"
         description="Gérer les agents déployés sur vos serveurs"
         icon={Server}
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => refetchRunners()}>
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Actualiser
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" onClick={() => refetchRunners()}>
+            <RefreshCw className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Actualiser</span>
+          </Button>
         }
       />
 
       {/* Configuration API */}
-      <div className="glass-panel rounded-xl p-5 glow-border">
-        <div className="flex items-center gap-2 mb-4">
-          <Settings2 className="w-5 h-5 text-primary" />
-          <h3 className="font-semibold">Configuration API</h3>
+      <div className="glass-panel rounded-xl p-4 sm:p-5 glow-border">
+        <div className="flex items-center gap-2 mb-3 sm:mb-4">
+          <Settings2 className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+          <h3 className="font-semibold text-sm sm:text-base">Configuration API</h3>
         </div>
         
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="runner_base_url">URL de base du Runner API</Label>
-            <div className="flex gap-2">
+            <Label htmlFor="runner_base_url" className="text-xs sm:text-sm">URL de base du Runner API</Label>
+            <div className="flex flex-col sm:flex-row gap-2">
               <Input
                 id="runner_base_url"
-                placeholder="https://lqocccsxzqnbcwshseom.supabase.co/functions/v1/runner-api"
+                placeholder="https://...supabase.co/functions/v1/runner-api"
                 value={runnerBaseUrl}
                 onChange={(e) => setRunnerBaseUrl(e.target.value)}
+                className="text-sm"
               />
               <Button 
                 onClick={handleSave} 
                 disabled={!isDirty || isUpdating}
                 variant={isDirty ? "default" : "outline"}
+                className="shrink-0"
               >
-                <Save className="w-4 h-4 mr-2" />
-                {isUpdating ? 'Sauvegarde...' : 'Sauvegarder'}
+                <Save className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">{isUpdating ? 'Sauvegarde...' : 'Sauvegarder'}</span>
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              URL où les runners peuvent contacter l'API. Utilisez l'URL de votre Edge Function.
+              URL où les runners peuvent contacter l'API.
             </p>
           </div>
 
@@ -98,10 +98,10 @@ const Runner = () => {
 
       {/* Installation Script - Expert mode */}
       {isExpert && (
-        <div className="glass-panel rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Terminal className="w-5 h-5 text-primary" />
-            <h3 className="font-semibold">Script d'Installation</h3>
+        <div className="glass-panel rounded-xl p-4 sm:p-5">
+          <div className="flex items-center gap-2 mb-3 sm:mb-4">
+            <Terminal className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+            <h3 className="font-semibold text-sm sm:text-base">Script d'Installation</h3>
           </div>
           
           <InstallScript baseUrl={runnerBaseUrl} />
@@ -109,12 +109,15 @@ const Runner = () => {
       )}
 
       {/* Runners Table */}
-      <div className="glass-panel rounded-xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold">Runners Enregistrés</h3>
+      <div className="glass-panel rounded-xl p-4 sm:p-5">
+        <div className="flex items-center justify-between mb-3 sm:mb-4">
+          <h3 className="font-semibold text-sm sm:text-base">Runners Enregistrés</h3>
         </div>
         
-        <RunnersTable />
+        {/* Horizontal scroll on mobile for table */}
+        <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+          <RunnersTable />
+        </div>
       </div>
     </div>
   );
