@@ -43,6 +43,7 @@ interface PlaybookCatalogProps {
   runner: Runner;
   infrastructureId?: string;
   capabilities?: Record<string, unknown>;
+}
 
 const riskColors = {
   low: 'bg-green-500/10 text-green-400 border-green-500/30',
