@@ -74,14 +74,19 @@ export type Database = {
           created_by: string | null
           description: string | null
           error_message: string | null
+          exit_code: number | null
           id: string
           infrastructure_id: string | null
+          meta: Json | null
           name: string
           progress: number | null
+          report_incomplete: boolean | null
           result: Json | null
           runner_id: string
           started_at: string | null
           status: Database["public"]["Enums"]["order_status"]
+          stderr_tail: string | null
+          stdout_tail: string | null
           updated_at: string
         }
         Insert: {
@@ -92,14 +97,19 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           error_message?: string | null
+          exit_code?: number | null
           id?: string
           infrastructure_id?: string | null
+          meta?: Json | null
           name: string
           progress?: number | null
+          report_incomplete?: boolean | null
           result?: Json | null
           runner_id: string
           started_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
+          stderr_tail?: string | null
+          stdout_tail?: string | null
           updated_at?: string
         }
         Update: {
@@ -110,14 +120,19 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           error_message?: string | null
+          exit_code?: number | null
           id?: string
           infrastructure_id?: string | null
+          meta?: Json | null
           name?: string
           progress?: number | null
+          report_incomplete?: boolean | null
           result?: Json | null
           runner_id?: string
           started_at?: string | null
           status?: Database["public"]["Enums"]["order_status"]
+          stderr_tail?: string | null
+          stdout_tail?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -177,6 +192,44 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "runner_logs_runner_id_fkey"
+            columns: ["runner_id"]
+            isOneToOne: false
+            referencedRelation: "runners"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      runner_report_errors: {
+        Row: {
+          created_at: string
+          error_details: string | null
+          error_type: string
+          id: string
+          raw_body: string
+          runner_id: string | null
+          timestamp: string
+        }
+        Insert: {
+          created_at?: string
+          error_details?: string | null
+          error_type: string
+          id?: string
+          raw_body: string
+          runner_id?: string | null
+          timestamp?: string
+        }
+        Update: {
+          created_at?: string
+          error_details?: string | null
+          error_type?: string
+          id?: string
+          raw_body?: string
+          runner_id?: string | null
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runner_report_errors_runner_id_fkey"
             columns: ["runner_id"]
             isOneToOne: false
             referencedRelation: "runners"

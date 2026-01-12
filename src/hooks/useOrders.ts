@@ -18,6 +18,11 @@ export interface Order {
   progress: number | null;
   result: Json;
   error_message: string | null;
+  exit_code: number | null;
+  stdout_tail: string | null;
+  stderr_tail: string | null;
+  report_incomplete: boolean | null;
+  meta: Json;
   created_by: string | null;
   created_at: string;
   started_at: string | null;

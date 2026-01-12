@@ -62,7 +62,7 @@ const statusConfig: Record<OrderStatus, { icon: React.ReactNode; label: string; 
   },
   completed: {
     icon: <CheckCircle2 className="w-4 h-4" />,
-    label: 'Terminé',
+    label: 'Appliqué',
     class: 'bg-green-500/10 text-green-400 border-green-500/30',
   },
   failed: {
@@ -126,7 +126,7 @@ function OrderItem({ order }: { order: Order }) {
               </pre>
             </div>
 
-            {/* Timeline */}
+            {/* Timeline + Exit Code */}
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div>
                 <span className="text-muted-foreground">Créé : </span>
@@ -144,12 +144,50 @@ function OrderItem({ order }: { order: Order }) {
                   <span>{format(new Date(order.completed_at), "HH:mm:ss", { locale: fr })}</span>
                 </div>
               )}
+              {order.exit_code !== null && order.exit_code !== undefined && (
+                <div>
+                  <span className="text-muted-foreground">Exit code : </span>
+                  <span className={`font-mono ${order.exit_code === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                    {order.exit_code}
+                  </span>
+                </div>
+              )}
             </div>
+
+            {/* Report incomplete warning */}
+            {order.report_incomplete && (
+              <div className="p-2 rounded bg-yellow-500/10 border border-yellow-500/30">
+                <p className="text-xs text-yellow-400">⚠️ Rapport incomplet (certains champs manquants)</p>
+              </div>
+            )}
 
             {/* Error message */}
             {order.error_message && (
               <div className="p-2 rounded bg-red-500/10 border border-red-500/30">
-                <p className="text-xs text-red-400">{order.error_message}</p>
+                <p className="text-xs font-medium text-red-400 mb-1">Erreur</p>
+                <pre className="text-xs text-red-300 whitespace-pre-wrap max-h-24 overflow-y-auto font-mono">
+                  {order.error_message}
+                </pre>
+              </div>
+            )}
+
+            {/* Stderr tail (for failed orders) */}
+            {order.status === 'failed' && order.stderr_tail && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Stderr (extrait)</p>
+                <pre className="text-xs bg-red-500/5 border border-red-500/20 p-2 rounded overflow-x-auto font-mono max-h-32 text-red-300">
+                  {order.stderr_tail}
+                </pre>
+              </div>
+            )}
+
+            {/* Stdout tail */}
+            {order.stdout_tail && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1">Stdout (extrait)</p>
+                <pre className="text-xs bg-background/50 p-2 rounded overflow-x-auto font-mono max-h-32">
+                  {order.stdout_tail}
+                </pre>
               </div>
             )}
 
