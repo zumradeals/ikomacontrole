@@ -8,6 +8,7 @@ import { PlatformGating } from '@/components/platform/PlatformGating';
 import { InfraSelector } from '@/components/platform/InfraSelector';
 import { ServiceLogsDialog } from '@/components/platform/ServiceLogsDialog';
 import { CaddyRouteDialog } from '@/components/platform/CaddyRouteDialog';
+import { SupabaseInstallDialog, SupabaseInstallConfig } from '@/components/platform/SupabaseInstallDialog';
 import { usePlatformServices, PREREQUISITE_PLAYBOOKS, PlatformService } from '@/hooks/usePlatformServices';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
@@ -19,6 +20,7 @@ const Platform = () => {
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   const [selectedServiceForLogs, setSelectedServiceForLogs] = useState<PlatformService | null>(null);
   const [caddyRouteDialogOpen, setCaddyRouteDialogOpen] = useState(false);
+  const [supabaseInstallDialogOpen, setSupabaseInstallDialogOpen] = useState(false);
 
   const {
     infrastructures,
