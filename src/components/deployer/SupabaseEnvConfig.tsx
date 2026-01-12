@@ -21,7 +21,11 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
-import { usePlatformServices } from '@/hooks/usePlatformServices';
+import { 
+  useSupabaseInstance, 
+  getSupabaseCredentialsForFrontend,
+  getSupabaseCredentialsForBackend,
+} from '@/hooks/usePlatformInstances';
 
 // Framework detection patterns
 export type FrameworkType = 'vite' | 'nextjs' | 'node' | 'unknown';
@@ -81,12 +85,11 @@ export function SupabaseEnvConfig({
   const [showAnonKey, setShowAnonKey] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  // Get Platform services for the selected infrastructure
-  const { services, gating } = usePlatformServices(infrastructureId);
+  // Get Supabase instance from Platform for the selected infrastructure
+  const { data: supabaseInstance, isLoading: isLoadingInstance } = useSupabaseInstance(infrastructureId);
   
   // Check if Supabase is installed on Platform
-  const supabaseService = services.find(s => s.id === 'supabase');
-  const supabaseInstalled = supabaseService?.status === 'installed';
+  const supabaseInstalled = supabaseInstance?.status === 'installed';
 
   // Is this a frontend build (dangerous for service role key)?
   const isFrontendBuild = deployType === 'static_site' || 
@@ -128,27 +131,37 @@ export function SupabaseEnvConfig({
 
   // Handle import from Platform
   const handleImportFromPlatform = async () => {
+    if (!supabaseInstance) {
+      toast.error('Aucune instance Supabase trouvée');
+      return;
+    }
+
     setIsImporting(true);
     try {
-      // TODO: In a real implementation, this would fetch from the platform_instances table
-      // For now, we'll simulate getting credentials from Platform
-      // The actual implementation would query the Supabase instance configuration stored in DB
-      
-      // Simulated platform data - in reality this comes from platform_instances or settings table
-      const platformSupabase = {
-        url: infrastructureId ? `https://${infrastructureId.slice(0, 8)}.supabase.local` : '',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1sb2NhbCIsInJvbGUiOiJhbm9uIn0.placeholder',
-        serviceRoleKey: !isFrontendBuild ? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1sb2NhbCIsInJvbGUiOiJzZXJ2aWNlX3JvbGUifQ.placeholder' : undefined,
+      // Get credentials based on build type
+      const platformCredentials = isFrontendBuild 
+        ? getSupabaseCredentialsForFrontend(supabaseInstance)
+        : getSupabaseCredentialsForBackend(supabaseInstance);
+
+      if (!platformCredentials) {
+        toast.error('Credentials Supabase invalides dans Platform');
+        return;
+      }
+
+      const newCredentials: SupabaseCredentials = {
+        url: platformCredentials.url,
+        anonKey: platformCredentials.anonKey,
+        serviceRoleKey: !isFrontendBuild ? platformCredentials.serviceRoleKey : undefined,
       };
 
-      onCredentialsChange(platformSupabase);
+      onCredentialsChange(newCredentials);
       
       // Auto-map to env vars
       const newEnvVars = { ...envVars };
-      newEnvVars[envMapping.url] = platformSupabase.url;
-      newEnvVars[envMapping.anonKey] = platformSupabase.anonKey;
-      if (platformSupabase.serviceRoleKey && envMapping.serviceRole && !isFrontendBuild) {
-        newEnvVars[envMapping.serviceRole] = platformSupabase.serviceRoleKey;
+      newEnvVars[envMapping.url] = platformCredentials.url;
+      newEnvVars[envMapping.anonKey] = platformCredentials.anonKey;
+      if (platformCredentials.serviceRoleKey && envMapping.serviceRole && !isFrontendBuild) {
+        newEnvVars[envMapping.serviceRole] = platformCredentials.serviceRoleKey;
       }
       onEnvVarsChange(newEnvVars);
 
@@ -198,6 +211,9 @@ export function SupabaseEnvConfig({
           <Badge variant="outline" className="text-xs">
             {framework.toUpperCase()}
           </Badge>
+          {isLoadingInstance && (
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          )}
         </div>
         <Switch
           checked={isSupabaseProject}
@@ -235,10 +251,17 @@ export function SupabaseEnvConfig({
             </div>
           )}
 
-          {!supabaseInstalled && gating.hasInfra && (
+          {!supabaseInstalled && infrastructureId && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-muted text-sm text-muted-foreground">
               <AlertTriangle className="w-4 h-4" />
               <span>Supabase n'est pas installé sur cette infrastructure. Saisissez les credentials manuellement.</span>
+            </div>
+          )}
+
+          {!infrastructureId && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-muted text-sm text-muted-foreground">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Sélectionnez d'abord un runner avec une infrastructure pour voir les instances Platform.</span>
             </div>
           )}
 
