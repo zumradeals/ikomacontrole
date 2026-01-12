@@ -1,5 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { useSetting } from './useSettings';
+import { useSettings } from './useSettings';
+
+// Hook to get a single setting value
+function useSetting(key: string) {
+  const { getSetting, isLoading } = useSettings();
+  return {
+    data: isLoading ? undefined : getSetting(key) || undefined,
+    isLoading,
+  };
+}
 
 interface DashboardStats {
   runners: {
