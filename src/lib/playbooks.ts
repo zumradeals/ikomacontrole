@@ -854,7 +854,130 @@ echo "Running Docker verification..."
 docker run --rm hello-world
 
 echo ""
-echo "✓ Docker is working correctly"
+    echo "✓ Docker is working correctly"
+`,
+  },
+];
+
+// ============================================================================
+// GROUP E-bis: Redis
+// ============================================================================
+
+const REDIS_PLAYBOOKS: Playbook[] = [
+  {
+    id: 'redis.install',
+    group: 'redis',
+    name: 'Installer Redis',
+    description: 'Cache clé-valeur en mémoire (via Docker)',
+    level: 'simple',
+    risk: 'low',
+    duration: '~2min',
+    icon: Zap,
+    prerequisites: [
+      { capability: 'docker.installed', label: 'Docker', required: true }
+    ],
+    verifies: ['redis.installed'],
+    command: `#!/bin/bash
+set -e
+
+if docker ps --format '{{.Names}}' | grep -q "^redis$"; then
+  echo "Redis already running"
+  docker ps --filter name=redis
+  exit 0
+fi
+
+echo "Installing Redis via Docker..."
+
+docker run -d \\
+  --name redis \\
+  --restart unless-stopped \\
+  -p 6379:6379 \\
+  -v redis-data:/data \\
+  redis:alpine redis-server --appendonly yes
+
+echo ""
+echo "Waiting for Redis to start..."
+sleep 3
+
+if docker ps --filter name=redis --filter status=running | grep -q redis; then
+  echo "✓ Redis installed and running on port 6379"
+  docker exec redis redis-cli ping
+else
+  echo "✗ Redis failed to start"
+  docker logs redis
+  exit 1
+fi
+`,
+  },
+  {
+    id: 'redis.healthcheck',
+    group: 'redis',
+    name: 'Healthcheck Redis',
+    description: 'Vérifie que Redis répond correctement',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Zap,
+    prerequisites: [
+      { capability: 'docker.installed', label: 'Docker', required: true }
+    ],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== Redis Health Check ==="
+
+if ! docker ps --format '{{.Names}}' | grep -q "^redis$"; then
+  echo "✗ Redis container not running"
+  exit 1
+fi
+
+# Ping test
+PING_RESULT=\$(docker exec redis redis-cli ping 2>/dev/null)
+if [ "\$PING_RESULT" = "PONG" ]; then
+  echo "✓ Redis PING: PONG"
+else
+  echo "✗ Redis not responding"
+  exit 1
+fi
+
+# Info
+echo ""
+echo "Redis Info:"
+docker exec redis redis-cli info server | grep -E "redis_version|uptime|tcp_port"
+docker exec redis redis-cli info memory | grep -E "used_memory_human"
+
+echo ""
+echo "✓ Redis is healthy"
+`,
+  },
+  {
+    id: 'redis.status',
+    group: 'redis',
+    name: 'Status Redis',
+    description: 'Affiche l\'état du service Redis',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Zap,
+    prerequisites: [],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== Redis Status ==="
+
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^redis$"; then
+  echo "✓ Container: Running"
+  docker ps --filter name=redis --format "table {{.Status}}\\t{{.Ports}}"
+  
+  # Stats
+  echo ""
+  echo "Memory usage:"
+  docker exec redis redis-cli info memory | grep used_memory_human
+  
+  echo ""
+  echo "Clients connected:"
+  docker exec redis redis-cli info clients | grep connected_clients
+else
+  echo "✗ Redis not running"
+fi
 `,
   },
 ];
@@ -991,11 +1114,108 @@ echo "  3. No firewall blocking inbound traffic"
 
 const MONITORING_PLAYBOOKS: Playbook[] = [
   {
+    id: 'monitor.prometheus.install',
+    group: 'monitoring',
+    name: 'Installer Prometheus',
+    description: 'Système de monitoring et alerting (via Docker)',
+    level: 'simple',
+    risk: 'low',
+    duration: '~3min',
+    icon: Monitor,
+    prerequisites: [
+      { capability: 'docker.installed', label: 'Docker', required: true },
+      { capability: 'docker.compose.installed', label: 'Docker Compose', required: true }
+    ],
+    verifies: ['prometheus.installed'],
+    command: `#!/bin/bash
+set -e
+
+PROMETHEUS_DIR="/opt/prometheus"
+
+if docker ps --format '{{.Names}}' | grep -q "^prometheus$"; then
+  echo "Prometheus already running"
+  docker ps --filter name=prometheus
+  exit 0
+fi
+
+echo "Installing Prometheus via Docker..."
+
+mkdir -p \$PROMETHEUS_DIR
+
+# Create prometheus config
+cat > \$PROMETHEUS_DIR/prometheus.yml <<EOF
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+  
+  - job_name: 'node'
+    static_configs:
+      - targets: ['host.docker.internal:9100']
+EOF
+
+# Run Prometheus container
+docker run -d \\
+  --name prometheus \\
+  --restart unless-stopped \\
+  -p 9090:9090 \\
+  -v \$PROMETHEUS_DIR/prometheus.yml:/etc/prometheus/prometheus.yml \\
+  prom/prometheus:latest
+
+echo ""
+echo "Waiting for Prometheus to start..."
+sleep 5
+
+if docker ps --filter name=prometheus --filter status=running | grep -q prometheus; then
+  echo "✓ Prometheus installed and running on port 9090"
+else
+  echo "✗ Prometheus failed to start"
+  docker logs prometheus
+  exit 1
+fi
+`,
+  },
+  {
+    id: 'monitor.prometheus.status',
+    group: 'monitoring',
+    name: 'Status Prometheus',
+    description: 'Vérifie l\'état du service Prometheus',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Monitor,
+    prerequisites: [
+      { capability: 'docker.installed', label: 'Docker', required: true }
+    ],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== Prometheus Status ==="
+
+if docker ps --format '{{.Names}}' | grep -q "^prometheus$"; then
+  echo "✓ Container: Running"
+  docker ps --filter name=prometheus --format "table {{.Status}}\\t{{.Ports}}"
+  
+  # Health check
+  if curl -s http://localhost:9090/-/healthy | grep -q "Prometheus"; then
+    echo "✓ Health: OK"
+  else
+    echo "⚠ Health: Check failed"
+  fi
+else
+  echo "✗ Prometheus not running"
+fi
+`,
+  },
+  {
     id: 'monitor.node_exporter.install',
     group: 'monitoring',
     name: 'Installer Node Exporter',
     description: 'Métriques système pour Prometheus',
-    level: 'expert',
+    level: 'simple',
     risk: 'low',
     duration: '~2min',
     icon: Monitor,
@@ -1013,7 +1233,7 @@ echo "Installing Node Exporter..."
 
 VERSION="1.7.0"
 ARCH=$(uname -m)
-case $ARCH in
+case \$ARCH in
   x86_64) ARCH="amd64" ;;
   aarch64) ARCH="arm64" ;;
 esac
@@ -1025,7 +1245,7 @@ mv "node_exporter-\${VERSION}.linux-\${ARCH}/node_exporter" /usr/local/bin/
 rm -rf "node_exporter-\${VERSION}.linux-\${ARCH}"*
 
 # Create systemd service
-cat > /etc/systemd/system/node_exporter.service <<EOF
+cat > /etc/systemd/system/node_exporter.service <<EOSVC
 [Unit]
 Description=Node Exporter
 After=network.target
@@ -1037,7 +1257,7 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOSVC
 
 systemctl daemon-reload
 systemctl enable node_exporter
@@ -1045,6 +1265,43 @@ systemctl start node_exporter
 
 echo ""
 echo "✓ Node Exporter installed and running on port 9100"
+`,
+  },
+  {
+    id: 'monitor.stack.status',
+    group: 'monitoring',
+    name: 'Status stack monitoring',
+    description: 'Vérifie Prometheus + Node Exporter',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Monitor,
+    prerequisites: [],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== Monitoring Stack Status ==="
+echo ""
+
+# Prometheus
+echo "Prometheus:"
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^prometheus$"; then
+  echo "  ✓ Running (Docker)"
+elif systemctl is-active --quiet prometheus 2>/dev/null; then
+  echo "  ✓ Running (systemd)"
+else
+  echo "  ✗ Not running"
+fi
+
+# Node Exporter
+echo ""
+echo "Node Exporter:"
+if systemctl is-active --quiet node_exporter 2>/dev/null; then
+  echo "  ✓ Running on port 9100"
+elif curl -s http://localhost:9100/metrics > /dev/null 2>&1; then
+  echo "  ✓ Running on port 9100"
+else
+  echo "  ✗ Not running"
+fi
 `,
   },
 ];
@@ -1390,6 +1647,12 @@ export const PLAYBOOK_GROUPS = {
     icon: Container,
     playbooks: DOCKER_PLAYBOOKS,
   },
+  redis: {
+    label: 'Redis',
+    description: 'Cache clé-valeur',
+    icon: Zap,
+    playbooks: REDIS_PLAYBOOKS,
+  },
   proxy: {
     label: 'Proxy & TLS',
     description: 'Caddy, Nginx, certificats',
@@ -1421,6 +1684,7 @@ export const ALL_PLAYBOOKS: Playbook[] = [
   ...NETWORK_PLAYBOOKS,
   ...RUNTIME_PLAYBOOKS,
   ...DOCKER_PLAYBOOKS,
+  ...REDIS_PLAYBOOKS,
   ...PROXY_PLAYBOOKS,
   ...MONITORING_PLAYBOOKS,
   ...SUPABASE_PLAYBOOKS,
