@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -44,6 +44,9 @@ import {
   Package,
   FileCode,
   CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Database,
 } from 'lucide-react';
 import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
@@ -56,6 +59,12 @@ import {
   HealthcheckType,
   CreateDeploymentInput,
 } from '@/hooks/useDeployments';
+import { 
+  SupabaseEnvConfig, 
+  SupabaseCredentials, 
+  detectFramework,
+  FrameworkType,
+} from './SupabaseEnvConfig';
 
 const sourceSchema = z.object({
   app_name: z
@@ -112,6 +121,8 @@ interface DeployWizardProps {
 export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: DeployWizardProps) {
   const [currentStep, setCurrentStep] = useState<WizardStep>('source');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [supabaseCredentials, setSupabaseCredentials] = useState<SupabaseCredentials | null>(null);
+  const [parsedEnvVars, setParsedEnvVars] = useState<Record<string, string>>({});
   
   const { data: runners } = useRunners();
   const { data: infrastructures } = useInfrastructures();
@@ -130,6 +141,11 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
       deploy_type: 'nodejs',
     },
   });
+
+  // Detect framework based on deploy type
+  const detectedFramework = useMemo<FrameworkType>(() => {
+    return detectFramework(sourceForm.watch('deploy_type'));
+  }, [sourceForm.watch('deploy_type')]);
 
   const targetForm = useForm<z.infer<typeof targetSchema>>({
     resolver: zodResolver(targetSchema),
@@ -208,6 +224,43 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
     return vars;
   };
 
+  // Merge manual env vars with Supabase credentials
+  const getMergedEnvVars = (): Record<string, string> => {
+    const manualVars = parseEnvVars(configForm.getValues().env_vars || '');
+    return { ...manualVars, ...parsedEnvVars };
+  };
+
+  // Validate Supabase credentials if project uses Supabase
+  const supabaseValidation = useMemo(() => {
+    const isFrontend = sourceForm.watch('deploy_type') === 'static_site' || detectedFramework === 'vite';
+    
+    if (!supabaseCredentials) {
+      return { isRequired: false, isValid: true, errors: [] };
+    }
+
+    const errors: string[] = [];
+    
+    if (!supabaseCredentials.url) {
+      errors.push('SUPABASE_URL manquant');
+    } else if (!supabaseCredentials.url.startsWith('https://')) {
+      errors.push('SUPABASE_URL doit être HTTPS');
+    }
+
+    if (!supabaseCredentials.anonKey) {
+      errors.push('SUPABASE_ANON_KEY manquant');
+    }
+
+    if (supabaseCredentials.serviceRoleKey && isFrontend) {
+      errors.push('SERVICE_ROLE_KEY interdite dans build frontend');
+    }
+
+    return {
+      isRequired: true,
+      isValid: errors.length === 0,
+      errors,
+    };
+  }, [supabaseCredentials, sourceForm.watch('deploy_type'), detectedFramework]);
+
   const getDeploymentInput = (): CreateDeploymentInput => {
     const source = sourceForm.getValues();
     const target = targetForm.getValues();
@@ -226,7 +279,7 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
       healthcheck_value: config.healthcheck_value || '/',
       expose_via_caddy: config.expose_via_caddy,
       domain: config.domain || undefined,
-      env_vars: parseEnvVars(config.env_vars || ''),
+      env_vars: getMergedEnvVars(),
     };
   };
 
@@ -269,7 +322,14 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
     targetForm.reset();
     configForm.reset();
     setCurrentStep('source');
+    setSupabaseCredentials(null);
+    setParsedEnvVars({});
   };
+
+  // Get selected runner's infrastructure ID
+  const selectedRunnerId = targetForm.watch('runner_id');
+  const selectedRunner = runners?.find(r => r.id === selectedRunnerId);
+  const selectedInfrastructureId = selectedRunner?.infrastructure_id || undefined;
 
   const getRunnerInfra = (runnerId: string) => {
     const runner = runners?.find(r => r.id === runnerId);
@@ -553,6 +613,19 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
 
                   <Separator />
 
+                  {/* Supabase Configuration Section */}
+                  <SupabaseEnvConfig
+                    deployType={sourceForm.watch('deploy_type') as 'nodejs' | 'docker_compose' | 'static_site' | 'custom'}
+                    framework={detectedFramework}
+                    infrastructureId={selectedInfrastructureId}
+                    credentials={supabaseCredentials}
+                    onCredentialsChange={setSupabaseCredentials}
+                    envVars={parsedEnvVars}
+                    onEnvVarsChange={setParsedEnvVars}
+                  />
+
+                  <Separator />
+
                   <FormField
                     control={configForm.control}
                     name="expose_via_caddy"
@@ -593,7 +666,7 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
                     name="env_vars"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Variables d'environnement</FormLabel>
+                        <FormLabel>Variables d'environnement additionnelles</FormLabel>
                         <FormControl>
                           <textarea
                             className="w-full h-24 px-3 py-2 text-sm rounded-md border border-input bg-background font-mono"
@@ -601,7 +674,7 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
                             {...field}
                           />
                         </FormControl>
-                        <FormDescription>Une variable par ligne (KEY=value)</FormDescription>
+                        <FormDescription>Une variable par ligne (KEY=value). Les variables Supabase sont gérées ci-dessus.</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -613,6 +686,60 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
             {/* Step 4: Preview */}
             {currentStep === 'preview' && (
               <div className="space-y-4">
+                {/* Env Check Summary */}
+                <div className={`rounded-lg border p-4 ${
+                  supabaseValidation.isRequired && !supabaseValidation.isValid 
+                    ? 'border-destructive/50 bg-destructive/5' 
+                    : 'border-green-500/50 bg-green-500/5'
+                }`}>
+                  <h4 className="font-medium mb-3 flex items-center gap-2">
+                    {supabaseValidation.isRequired && !supabaseValidation.isValid ? (
+                      <XCircle className="w-4 h-4 text-destructive" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    )}
+                    Vérification des Variables
+                  </h4>
+                  
+                  {supabaseCredentials ? (
+                    <div className="space-y-2">
+                      {supabaseValidation.isValid ? (
+                        <div className="flex items-center gap-2 text-sm text-green-600">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Credentials Supabase configurés</span>
+                        </div>
+                      ) : (
+                        supabaseValidation.errors.map((error, i) => (
+                          <div key={i} className="flex items-center gap-2 text-sm text-destructive">
+                            <XCircle className="w-4 h-4" />
+                            <span>{error}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Database className="w-4 h-4" />
+                      <span>Pas de configuration Supabase (projet non-Supabase)</span>
+                    </div>
+                  )}
+
+                  {Object.keys(getMergedEnvVars()).length > 0 && (
+                    <div className="mt-3 pt-3 border-t">
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {Object.keys(getMergedEnvVars()).length} variable(s) d'environnement
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {Object.keys(getMergedEnvVars()).map(key => (
+                          <Badge key={key} variant="outline" className="text-xs font-mono">
+                            {key}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="rounded-lg border border-border p-4 bg-muted/30">
                   <h4 className="font-medium mb-3">Résumé du déploiement</h4>
                   <div className="grid grid-cols-2 gap-4 text-sm">
@@ -679,7 +806,10 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
           </Button>
 
           {currentStep === 'preview' ? (
-            <Button onClick={handleDeploy} disabled={isSubmitting}>
+            <Button 
+              onClick={handleDeploy} 
+              disabled={isSubmitting || (supabaseValidation.isRequired && !supabaseValidation.isValid)}
+            >
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
