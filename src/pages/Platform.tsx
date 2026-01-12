@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Layers, RefreshCw, AlertTriangle } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -8,19 +9,19 @@ import { PlatformGating } from '@/components/platform/PlatformGating';
 import { InfraSelector } from '@/components/platform/InfraSelector';
 import { ServiceLogsDialog } from '@/components/platform/ServiceLogsDialog';
 import { CaddyRouteDialog } from '@/components/platform/CaddyRouteDialog';
-import { SupabaseInstallDialog, SupabaseInstallConfig } from '@/components/platform/SupabaseInstallDialog';
+import { CaddyDomainRegistry } from '@/components/platform/CaddyDomainRegistry';
 import { usePlatformServices, PREREQUISITE_PLAYBOOKS, PlatformService } from '@/hooks/usePlatformServices';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
 import { toast } from '@/hooks/use-toast';
 
 const Platform = () => {
+  const navigate = useNavigate();
   const [selectedInfraId, setSelectedInfraId] = useState<string | undefined>();
   const [executingServiceId, setExecutingServiceId] = useState<string | null>(null);
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   const [selectedServiceForLogs, setSelectedServiceForLogs] = useState<PlatformService | null>(null);
   const [caddyRouteDialogOpen, setCaddyRouteDialogOpen] = useState(false);
-  const [supabaseInstallDialogOpen, setSupabaseInstallDialogOpen] = useState(false);
 
   const {
     infrastructures,
@@ -201,6 +202,13 @@ caddy list-modules 2>/dev/null | head -5 || true
     }
   };
 
+  // Navigate to Supabase Setup page
+  const handleSupabaseSetup = (service: PlatformService) => {
+    if (service.id === 'supabase' && selectedInfraId) {
+      navigate(`/supabase-setup?infraId=${selectedInfraId}`);
+    }
+  };
+
   // Filter orders for selected service
   const serviceOrders = useMemo(() => {
     if (!selectedServiceForLogs) return [];
@@ -239,6 +247,7 @@ caddy list-modules 2>/dev/null | head -5 || true
             )}
           </TabsTrigger>
           <TabsTrigger value="services">Services ({statusCounts.installed}/{statusCounts.total})</TabsTrigger>
+          <TabsTrigger value="domains">Domaines Caddy</TabsTrigger>
           <TabsTrigger value="logs">Historique</TabsTrigger>
         </TabsList>
 
@@ -278,7 +287,7 @@ caddy list-modules 2>/dev/null | head -5 || true
                   key={service.id}
                   service={service}
                   onPrecheck={() => handlePrecheck(service)}
-                  onInstall={() => handleInstall(service)}
+                  onInstall={service.id === 'supabase' ? () => handleSupabaseSetup(service) : () => handleInstall(service)}
                   onRefresh={() => handleRefresh(service)}
                   onViewLogs={() => handleViewLogs(service)}
                   onConfigure={service.id === 'caddy' ? () => handleConfigureCaddy(service) : undefined}
@@ -325,7 +334,7 @@ caddy list-modules 2>/dev/null | head -5 || true
                     <ServiceCard
                       service={service}
                       onPrecheck={() => handlePrecheck(service)}
-                      onInstall={() => handleInstall(service)}
+                      onInstall={service.id === 'supabase' ? () => handleSupabaseSetup(service) : () => handleInstall(service)}
                       onRefresh={() => handleRefresh(service)}
                       onViewLogs={() => handleViewLogs(service)}
                       onConfigure={service.id === 'caddy' ? () => handleConfigureCaddy(service) : undefined}
@@ -336,6 +345,17 @@ caddy list-modules 2>/dev/null | head -5 || true
                 ))}
               </div>
             </div>
+          )}
+        </TabsContent>
+
+        {/* Domains Tab */}
+        <TabsContent value="domains" className="space-y-4">
+          {!selectedInfraId ? (
+            <div className="glass-panel rounded-xl p-8 text-center text-muted-foreground">
+              Sélectionnez une infrastructure pour gérer les domaines Caddy.
+            </div>
+          ) : (
+            <CaddyDomainRegistry infrastructureId={selectedInfraId} />
           )}
         </TabsContent>
 
