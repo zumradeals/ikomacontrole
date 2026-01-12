@@ -1035,6 +1035,281 @@ echo "✓ Caddy installed: $(caddy version)"
 `,
   },
   {
+    id: 'proxy.caddy.status',
+    group: 'proxy',
+    name: 'Status Caddy',
+    description: 'Vérifie l\'état du service Caddy',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Globe,
+    prerequisites: [
+      { capability: 'caddy.installed', label: 'Caddy', required: true }
+    ],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== Caddy Status ==="
+
+if ! command -v caddy &>/dev/null; then
+  echo "✗ Caddy not installed"
+  exit 1
+fi
+
+echo "Version: \$(caddy version)"
+echo ""
+
+# Check service status
+if systemctl is-active --quiet caddy 2>/dev/null; then
+  echo "✓ Service: Running"
+  systemctl status caddy --no-pager | head -10
+else
+  echo "✗ Service: Not running"
+fi
+
+echo ""
+echo "=== Current Caddyfile ==="
+cat /etc/caddy/Caddyfile 2>/dev/null || echo "No Caddyfile found"
+
+echo ""
+echo "=== Listening ports ==="
+ss -tlnp | grep caddy || echo "No ports found"
+`,
+  },
+  {
+    id: 'proxy.caddy.configure_route',
+    group: 'proxy',
+    name: 'Configurer route Caddy',
+    description: 'Ajoute une route reverse proxy (domain → backend)',
+    level: 'simple',
+    risk: 'medium',
+    duration: '~30s',
+    icon: Globe,
+    prerequisites: [
+      { capability: 'caddy.installed', label: 'Caddy', required: true }
+    ],
+    verifies: ['caddy.configured'],
+    command: `#!/bin/bash
+set -e
+
+# This playbook shows how to configure a route
+# In production, you'd pass domain and backend as parameters
+
+CADDYFILE="/etc/caddy/Caddyfile"
+BACKUP_DIR="/etc/caddy/backups"
+
+echo "=== Caddy Route Configuration ==="
+echo ""
+
+# Create backup directory
+mkdir -p \$BACKUP_DIR
+
+# Backup current config
+if [ -f "\$CADDYFILE" ]; then
+  cp "\$CADDYFILE" "\$BACKUP_DIR/Caddyfile.\$(date +%s).bak"
+  echo "✓ Backup created"
+fi
+
+# Show current config
+echo ""
+echo "Current Caddyfile:"
+echo "---"
+cat "\$CADDYFILE" 2>/dev/null || echo "(empty)"
+echo "---"
+
+echo ""
+echo "To add a route, edit /etc/caddy/Caddyfile with:"
+echo ""
+echo "  example.com {"
+echo "    reverse_proxy localhost:3000"
+echo "  }"
+echo ""
+echo "Then run 'caddy reload' or use the reload playbook."
+echo ""
+echo "Example configurations:"
+echo ""
+echo "# Simple reverse proxy"
+echo "app.example.com {"
+echo "  reverse_proxy localhost:3000"
+echo "}"
+echo ""
+echo "# With load balancing"
+echo "api.example.com {"
+echo "  reverse_proxy localhost:8001 localhost:8002 localhost:8003"
+echo "}"
+echo ""
+echo "# With websocket support"
+echo "ws.example.com {"
+echo "  reverse_proxy localhost:8080 {"
+echo "    header_up X-Real-IP {remote_host}"
+echo "  }"
+echo "}"
+echo ""
+echo "✓ Route configuration guide complete"
+`,
+  },
+  {
+    id: 'proxy.caddy.add_route',
+    group: 'proxy',
+    name: 'Ajouter route Caddy',
+    description: 'Ajoute une route avec domain et port spécifiés',
+    level: 'expert',
+    risk: 'medium',
+    duration: '~30s',
+    icon: Globe,
+    prerequisites: [
+      { capability: 'caddy.installed', label: 'Caddy', required: true }
+    ],
+    verifies: ['caddy.configured'],
+    command: `#!/bin/bash
+set -e
+
+# Default values - override these in the order meta or command
+DOMAIN="\\\${ROUTE_DOMAIN:-app.example.com}"
+BACKEND="\\\${ROUTE_BACKEND:-localhost:3000}"
+
+CADDYFILE="/etc/caddy/Caddyfile"
+BACKUP_DIR="/etc/caddy/backups"
+
+echo "=== Adding Caddy Route ==="
+echo "Domain: \$DOMAIN"
+echo "Backend: \$BACKEND"
+echo ""
+
+# Create backup
+mkdir -p \$BACKUP_DIR
+cp "\$CADDYFILE" "\$BACKUP_DIR/Caddyfile.\$(date +%s).bak" 2>/dev/null || true
+
+# Check if domain already exists
+if grep -q "^\$DOMAIN {" "\$CADDYFILE" 2>/dev/null; then
+  echo "⚠ Domain \$DOMAIN already configured in Caddyfile"
+  grep -A5 "^\$DOMAIN {" "\$CADDYFILE"
+  exit 0
+fi
+
+# Append new route
+cat >> "\$CADDYFILE" <<ROUTE
+
+\$DOMAIN {
+  reverse_proxy \$BACKEND
+  encode gzip
+  log {
+    output file /var/log/caddy/\$DOMAIN.log
+  }
+}
+ROUTE
+
+echo "✓ Route added to Caddyfile"
+echo ""
+
+# Validate config
+echo "Validating configuration..."
+if caddy validate --config "\$CADDYFILE" 2>&1; then
+  echo "✓ Configuration valid"
+else
+  echo "✗ Configuration invalid, restoring backup"
+  exit 1
+fi
+
+# Reload Caddy
+echo ""
+echo "Reloading Caddy..."
+caddy reload --config "\$CADDYFILE" 2>&1 || systemctl reload caddy
+
+echo ""
+echo "✓ Route \$DOMAIN → \$BACKEND configured and active"
+`,
+  },
+  {
+    id: 'proxy.caddy.reload',
+    group: 'proxy',
+    name: 'Recharger Caddy',
+    description: 'Recharge la configuration Caddy sans interruption',
+    level: 'simple',
+    risk: 'low',
+    duration: '~10s',
+    icon: Globe,
+    prerequisites: [
+      { capability: 'caddy.installed', label: 'Caddy', required: true }
+    ],
+    verifies: [],
+    command: `#!/bin/bash
+set -e
+
+CADDYFILE="/etc/caddy/Caddyfile"
+
+echo "=== Reloading Caddy ==="
+
+# Validate before reload
+echo "Validating configuration..."
+if ! caddy validate --config "\$CADDYFILE" 2>&1; then
+  echo "✗ Configuration invalid, aborting reload"
+  exit 1
+fi
+echo "✓ Configuration valid"
+
+# Reload
+echo ""
+echo "Reloading Caddy..."
+if caddy reload --config "\$CADDYFILE" 2>&1; then
+  echo "✓ Caddy reloaded successfully"
+elif systemctl reload caddy 2>&1; then
+  echo "✓ Caddy reloaded via systemctl"
+else
+  echo "✗ Reload failed"
+  exit 1
+fi
+
+echo ""
+echo "=== Current routes ==="
+caddy list-modules 2>/dev/null | head -10 || true
+echo ""
+echo "Listening on:"
+ss -tlnp | grep caddy || echo "Check ports manually"
+`,
+  },
+  {
+    id: 'proxy.caddy.list_routes',
+    group: 'proxy',
+    name: 'Lister routes Caddy',
+    description: 'Affiche toutes les routes configurées',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Globe,
+    prerequisites: [
+      { capability: 'caddy.installed', label: 'Caddy', required: true }
+    ],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== Caddy Routes ==="
+echo ""
+
+CADDYFILE="/etc/caddy/Caddyfile"
+
+if [ ! -f "\$CADDYFILE" ]; then
+  echo "✗ No Caddyfile found at \$CADDYFILE"
+  exit 1
+fi
+
+echo "Caddyfile location: \$CADDYFILE"
+echo ""
+
+# Extract domain blocks
+echo "Configured domains:"
+grep -E "^[a-zA-Z0-9].*{" "\$CADDYFILE" | sed 's/{//' | while read domain; do
+  echo "  • \$domain"
+done
+
+echo ""
+echo "=== Full Caddyfile ==="
+cat "\$CADDYFILE"
+
+echo ""
+echo "=== Caddy API (if enabled) ==="
+curl -s http://localhost:2019/config/ 2>/dev/null | head -50 || echo "Admin API not accessible"
+`,
+  },
+  {
     id: 'proxy.nginx.install',
     group: 'proxy',
     name: 'Installer Nginx',
