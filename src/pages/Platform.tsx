@@ -9,6 +9,7 @@ import { PlatformGating } from '@/components/platform/PlatformGating';
 import { InfraSelector } from '@/components/platform/InfraSelector';
 import { ServiceLogsDialog } from '@/components/platform/ServiceLogsDialog';
 import { CaddyDomainRegistry } from '@/components/platform/CaddyDomainRegistry';
+import { NginxDomainRegistry } from '@/components/platform/NginxDomainRegistry';
 import { usePlatformServices, PREREQUISITE_PLAYBOOKS, PlatformService } from '@/hooks/usePlatformServices';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
@@ -185,7 +186,7 @@ const Platform = () => {
       />
 
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="glass-panel p-1">
+        <TabsList className="glass-panel p-1 flex-wrap">
           <TabsTrigger value="overview">
             Vue d'ensemble
             {statusCounts.installing > 0 && (
@@ -193,7 +194,8 @@ const Platform = () => {
             )}
           </TabsTrigger>
           <TabsTrigger value="services">Services ({statusCounts.installed}/{statusCounts.total})</TabsTrigger>
-          <TabsTrigger value="domains">Domaines Caddy</TabsTrigger>
+          <TabsTrigger value="domains-caddy">Domaines Caddy</TabsTrigger>
+          <TabsTrigger value="domains-nginx">Domaines Nginx</TabsTrigger>
           <TabsTrigger value="logs">Historique</TabsTrigger>
         </TabsList>
 
@@ -298,14 +300,25 @@ const Platform = () => {
           )}
         </TabsContent>
 
-        {/* Domains Tab */}
-        <TabsContent value="domains" className="space-y-4">
+        {/* Caddy Domains Tab */}
+        <TabsContent value="domains-caddy" className="space-y-4">
           {!selectedInfraId ? (
             <div className="glass-panel rounded-xl p-8 text-center text-muted-foreground">
               Sélectionnez une infrastructure pour gérer les domaines Caddy.
             </div>
           ) : (
             <CaddyDomainRegistry infrastructureId={selectedInfraId} />
+          )}
+        </TabsContent>
+
+        {/* Nginx Domains Tab */}
+        <TabsContent value="domains-nginx" className="space-y-4">
+          {!selectedInfraId ? (
+            <div className="glass-panel rounded-xl p-8 text-center text-muted-foreground">
+              Sélectionnez une infrastructure pour gérer les domaines Nginx.
+            </div>
+          ) : (
+            <NginxDomainRegistry infrastructureId={selectedInfraId} />
           )}
         </TabsContent>
 
