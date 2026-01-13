@@ -917,12 +917,12 @@ mkdir -p \$INSTALL_DIR
 # Create runner script v2.1
 cat > \$INSTALL_DIR/runner.sh << 'RUNNER_SCRIPT_EOF'
 #!/bin/bash
+
 API_URL="\$1"
 TOKEN="\$2"
 HEARTBEAT_INTERVAL=\${3:-${HEARTBEAT_INTERVAL_SECONDS}}
 POLL_INTERVAL=\${4:-${POLL_INTERVAL_SECONDS}}
 
-LAST_HEARTBEAT=0
 RUNNER_VERSION="${RUNNER_VERSION}"
 
 log() {
@@ -930,14 +930,21 @@ log() {
 }
 
 send_heartbeat() {
-  RESPONSE=\$(curl -s -X POST "\$API_URL/heartbeat" \\
-    -H "x-runner-token: \$TOKEN" \\
-    -H "Content-Type: application/json" \\
-    -d "{\"version\": \"\$RUNNER_VERSION\"}" 2>&1)
-  if echo "\$RESPONSE" | grep -q '"success":true'; then
+  local response
+  response=\$(curl -sS \
+    --connect-timeout 5 \
+    --max-time 15 \
+    --retry 3 \
+    --retry-all-errors \
+    -X POST "\$API_URL/heartbeat" \
+    -H "x-runner-token: \$TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\\"version\\": \\\"\$RUNNER_VERSION\\\"}" 2>&1) || true
+
+  if echo "\$response" | grep -q '"success":true'; then
     log "Heartbeat OK"
   else
-    log "Heartbeat failed: \$RESPONSE"
+    log "Heartbeat failed: \$response"
   fi
 }
 
@@ -950,120 +957,157 @@ send_report() {
   local STARTED_AT="\$6"
   local FINISHED_AT="\$7"
   local RESULT="\$8"
-  
-  local ESCAPED_STDOUT=\$(echo "\$STDOUT_TAIL" | jq -Rs . 2>/dev/null || echo '""')
-  local ESCAPED_STDERR=\$(echo "\$STDERR_TAIL" | jq -Rs . 2>/dev/null || echo '""')
-  
+
+  local ESCAPED_STDOUT
+  local ESCAPED_STDERR
+  ESCAPED_STDOUT=\$(echo "\$STDOUT_TAIL" | jq -Rs . 2>/dev/null || echo '""')
+  ESCAPED_STDERR=\$(echo "\$STDERR_TAIL" | jq -Rs . 2>/dev/null || echo '""')
+
   local PAYLOAD
   if [ -n "\$RESULT" ]; then
     PAYLOAD="{
-  \\"order_id\\": \\"\$ORDER_ID\\",
-  \\"status\\": \\"\$STATUS\\",
-  \\"exit_code\\": \$EXIT_CODE,
-  \\"stdout_tail\\": \$ESCAPED_STDOUT,
-  \\"stderr_tail\\": \$ESCAPED_STDERR,
-  \\"started_at\\": \\"\$STARTED_AT\\",
-  \\"finished_at\\": \\"\$FINISHED_AT\\",
-  \\"result\\": \$RESULT,
-  \\"meta\\": {\\"runner_version\\": \\"\$RUNNER_VERSION\\"}
+  \\\"order_id\\\": \\\"\$ORDER_ID\\\",
+  \\\"status\\\": \\\"\$STATUS\\\",
+  \\\"exit_code\\\": \$EXIT_CODE,
+  \\\"stdout_tail\\\": \$ESCAPED_STDOUT,
+  \\\"stderr_tail\\\": \$ESCAPED_STDERR,
+  \\\"started_at\\\": \\\"\$STARTED_AT\\\",
+  \\\"finished_at\\\": \\\"\$FINISHED_AT\\\",
+  \\\"result\\\": \$RESULT,
+  \\\"meta\\\": {\\\"runner_version\\\": \\\"\$RUNNER_VERSION\\\"}
 }"
   else
     PAYLOAD="{
-  \\"order_id\\": \\"\$ORDER_ID\\",
-  \\"status\\": \\"\$STATUS\\",
-  \\"exit_code\\": \$EXIT_CODE,
-  \\"stdout_tail\\": \$ESCAPED_STDOUT,
-  \\"stderr_tail\\": \$ESCAPED_STDERR,
-  \\"started_at\\": \\"\$STARTED_AT\\",
-  \\"finished_at\\": \\"\$FINISHED_AT\\",
-  \\"meta\\": {\\"runner_version\\": \\"\$RUNNER_VERSION\\"}
+  \\\"order_id\\\": \\\"\$ORDER_ID\\\",
+  \\\"status\\\": \\\"\$STATUS\\\",
+  \\\"exit_code\\\": \$EXIT_CODE,
+  \\\"stdout_tail\\\": \$ESCAPED_STDOUT,
+  \\\"stderr_tail\\\": \$ESCAPED_STDERR,
+  \\\"started_at\\\": \\\"\$STARTED_AT\\\",
+  \\\"finished_at\\\": \\\"\$FINISHED_AT\\\",
+  \\\"meta\\\": {\\\"runner_version\\\": \\\"\$RUNNER_VERSION\\\"}
 }"
   fi
-  
-  curl -s -X POST "\$API_URL/orders/report" \\
-    -H "x-runner-token: \$TOKEN" \\
-    -H "Content-Type: application/json" \\
-    -d "\$PAYLOAD" > /dev/null
+
+  # Never let reporting errors kill the runner
+  curl -sS \
+    --connect-timeout 5 \
+    --max-time 30 \
+    --retry 3 \
+    --retry-all-errors \
+    -X POST "\$API_URL/orders/report" \
+    -H "x-runner-token: \$TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "\$PAYLOAD" > /dev/null 2>&1 || true
 }
 
 poll_and_claim_orders() {
-  # Use /orders/claim for atomic order acquisition (prevents race conditions)
-  CLAIM_RESPONSE=\$(curl -s -X POST "\$API_URL/orders/claim" -H "x-runner-token: \$TOKEN" -H "Content-Type: application/json" 2>&1)
-  
+  local CLAIM_RESPONSE
+  CLAIM_RESPONSE=\$(curl -sS \
+    --connect-timeout 5 \
+    --max-time 30 \
+    --retry 3 \
+    --retry-all-errors \
+    -X POST "\$API_URL/orders/claim" \
+    -H "x-runner-token: \$TOKEN" \
+    -H "Content-Type: application/json" 2>&1) || true
+
   if ! echo "\$CLAIM_RESPONSE" | grep -q '"success":true'; then
     log "Claim request failed: \$CLAIM_RESPONSE"
-    return
+    return 0
   fi
-  
-  # Check if we got an order
-  ORDER_ID=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.id // empty' 2>/dev/null)
-  
+
+  local ORDER_ID
+  ORDER_ID=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.id // empty' 2>/dev/null || true)
+
   if [ -z "\$ORDER_ID" ] || [ "\$ORDER_ID" = "null" ]; then
-    # No pending orders - this is normal
-    return
+    return 0
   fi
-  
-  ORDER_NAME=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.name // "Unknown"')
-  ORDER_CMD=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.command // ""')
-  
+
+  local ORDER_NAME ORDER_CMD
+  ORDER_NAME=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.name // "Unknown"' 2>/dev/null || echo "Unknown")
+  ORDER_CMD=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.command // ""' 2>/dev/null || echo "")
+
   log "Claimed order: \$ORDER_NAME (\$ORDER_ID)"
-  
+
+  local STARTED_AT FINISHED_AT
   STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  
+
+  local STDOUT_FILE STDERR_FILE
   STDOUT_FILE=\$(mktemp)
   STDERR_FILE=\$(mktemp)
-  
-  set +e
+
+  # IMPORTANT: keep heartbeats running even during long commands
   bash -c "\$ORDER_CMD" > "\$STDOUT_FILE" 2> "\$STDERR_FILE"
-  EXIT_CODE=\$?
-  set -e
-  
+  local EXIT_CODE=\$?
+
   FINISHED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  local STDOUT_TAIL STDERR_TAIL
   STDOUT_TAIL=\$(tail -c 10000 "\$STDOUT_FILE" 2>/dev/null || echo "")
   STDERR_TAIL=\$(tail -c 10000 "\$STDERR_FILE" 2>/dev/null || echo "")
-  
+
+  local STATUS RESULT JSON_LINE
+  RESULT=""
+
   if [ "\$EXIT_CODE" -eq 0 ]; then
     STATUS="applied"
     log "Order completed (exit_code=0)"
-    
-    # Extract JSON result from stdout
-    RESULT=""
-    JSON_LINE=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
+
+    JSON_LINE=\$(grep -E '^\\{.*\\}$' "\$STDOUT_FILE" | tail -1 2>/dev/null || true)
     if [ -n "\$JSON_LINE" ] && echo "\$JSON_LINE" | jq . >/dev/null 2>&1; then
       RESULT="\$JSON_LINE"
       log "Extracted JSON result"
     fi
-    
-    if [ -n "\$RESULT" ]; then
-      send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
-    else
-      send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
-    fi
   else
     STATUS="failed"
     log "Order failed (exit_code=\$EXIT_CODE)"
-    send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
   fi
-  
+
+  send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
+
   rm -f "\$STDOUT_FILE" "\$STDERR_FILE"
+  return 0
+}
+
+heartbeat_loop() {
+  while true; do
+    send_heartbeat
+    sleep "\$HEARTBEAT_INTERVAL"
+  done
+}
+
+poll_loop() {
+  while true; do
+    poll_and_claim_orders
+    sleep "\$POLL_INTERVAL"
+  done
 }
 
 log "Starting Ikoma Runner v\$RUNNER_VERSION"
 log "API URL: \$API_URL"
 log "Heartbeat: \${HEARTBEAT_INTERVAL}s, Poll: \${POLL_INTERVAL}s"
 
+# Mark online immediately
 send_heartbeat
 
+heartbeat_loop &
+HB_PID=\$!
+
+poll_loop &
+POLL_PID=\$!
+
+# If any loop dies, exit so systemd restarts the service.
 while true; do
-  CURRENT_TIME=\$(date +%s)
-  
-  if [ \$((CURRENT_TIME - LAST_HEARTBEAT)) -ge \$HEARTBEAT_INTERVAL ]; then
-    send_heartbeat
-    LAST_HEARTBEAT=\$CURRENT_TIME
+  if ! kill -0 "\$HB_PID" 2>/dev/null; then
+    log "Heartbeat loop exited; triggering restart"
+    exit 1
   fi
-  
-  poll_and_claim_orders
-  sleep \$POLL_INTERVAL
+  if ! kill -0 "\$POLL_PID" 2>/dev/null; then
+    log "Poll loop exited; triggering restart"
+    exit 1
+  fi
+  sleep 5
 done
 RUNNER_SCRIPT_EOF
 
