@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
   Play, 
   RefreshCw, 
@@ -11,7 +12,9 @@ import {
   Clock,
   Settings,
   Route,
-  ExternalLink
+  ExternalLink,
+  HelpCircle,
+  Search
 } from 'lucide-react';
 import { PlatformService, ServiceStatus } from '@/hooks/usePlatformServices';
 
@@ -23,6 +26,7 @@ interface ServiceCardProps {
   onRefresh?: () => void;
   onConfigure?: () => void;
   onSetup?: () => void;
+  onVerify?: () => void;
   disabled?: boolean;
   isLoading?: boolean;
 }
@@ -66,6 +70,21 @@ const statusConfig: Record<ServiceStatus, {
     color: 'bg-gray-500/10 text-gray-400 border-gray-500/30', 
     icon: Clock,
     dotColor: 'bg-gray-500',
+  },
+  unknown: { 
+    color: 'bg-muted text-muted-foreground border-border', 
+    icon: HelpCircle,
+    dotColor: 'bg-muted-foreground',
+  },
+  stale: { 
+    color: 'bg-amber-500/10 text-amber-400 border-amber-500/30', 
+    icon: AlertTriangle,
+    dotColor: 'bg-amber-500',
+  },
+  checking: { 
+    color: 'bg-purple-500/10 text-purple-400 border-purple-500/30', 
+    icon: Search,
+    dotColor: 'bg-purple-500 animate-pulse',
   },
 };
 
