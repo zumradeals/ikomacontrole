@@ -1,15 +1,20 @@
-import { Save, Hexagon, Palette, Sparkles } from 'lucide-react';
+import { useRef } from 'react';
+import { Save, Hexagon, Palette, Sparkles, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useAppMode } from '@/contexts/AppModeContext';
 import { useSettingInput } from '@/hooks/useSettings';
+import { useSystemLogo } from '@/hooks/useSystemLogo';
+import { useCurrentUserRole } from '@/hooks/useUserRoles';
 import { toast } from 'sonner';
-import { useState } from 'react';
 
 export function SettingsSystem() {
   const { mode, setMode, isExpert } = useAppMode();
+  const { logoUrl, isUploading, uploadLogo, removeLogo } = useSystemLogo();
+  const { isAdmin } = useCurrentUserRole();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const { 
     value: systemName, 
@@ -25,6 +30,16 @@ export function SettingsSystem() {
       toast.success('Nom du système sauvegardé');
     } catch (error) {
       toast.error('Erreur lors de la sauvegarde');
+    }
+  };
+
+  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await uploadLogo(file);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -68,19 +83,55 @@ export function SettingsSystem() {
             </p>
           </div>
 
-          {/* Logo Upload - Placeholder */}
+          {/* Logo Upload */}
           <div className="space-y-2">
             <Label>Logo du système</Label>
             <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
-                <Hexagon className="w-8 h-8 text-primary" />
+              <div className="w-16 h-16 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden">
+                {logoUrl ? (
+                  <img 
+                    src={logoUrl} 
+                    alt="Logo système" 
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <Hexagon className="w-8 h-8 text-primary" />
+                )}
               </div>
               <div className="space-y-2">
-                <Button variant="outline" size="sm" disabled>
-                  Changer le logo
-                </Button>
+                <div className="flex gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                    onChange={handleLogoChange}
+                    className="hidden"
+                  />
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading || !isAdmin}
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    {isUploading ? 'Téléchargement...' : 'Changer le logo'}
+                  </Button>
+                  {logoUrl && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={removeLogo}
+                      disabled={!isAdmin}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Bientôt disponible • PNG ou SVG, max 512x512px
+                  {isAdmin 
+                    ? 'PNG, SVG, JPEG ou WebP • max 2 Mo' 
+                    : 'Réservé aux administrateurs'}
                 </p>
               </div>
             </div>
