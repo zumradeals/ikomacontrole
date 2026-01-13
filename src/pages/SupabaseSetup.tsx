@@ -16,7 +16,9 @@ import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
 import { toast } from '@/hooks/use-toast';
 
-type SetupStep = 'domain' | 'routing' | 'preflight' | 'install' | 'credentials';
+type SetupStep = 'mode' | 'domain' | 'routing' | 'preflight' | 'install' | 'credentials';
+
+type InstallMode = 'with-proxy' | 'without-proxy';
 
 interface PreflightCheck {
   id: string;
@@ -27,7 +29,8 @@ interface PreflightCheck {
 
 const SupabaseSetup = () => {
   const [selectedInfraId, setSelectedInfraId] = useState<string | undefined>();
-  const [currentStep, setCurrentStep] = useState<SetupStep>('domain');
+  const [installMode, setInstallMode] = useState<InstallMode | null>(null);
+  const [currentStep, setCurrentStep] = useState<SetupStep>('mode');
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [isVerifyingRoute, setIsVerifyingRoute] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
@@ -60,10 +63,24 @@ const SupabaseSetup = () => {
   const supabaseService = services.find(s => s.id === 'supabase');
   const isSupabaseInstalled = supabaseService?.status === 'installed';
 
+  // Check if any proxy is ready
+  const hasProxyReady = gating.proxyReady || httpsReadyRoutes.length > 0;
+
   // Check if we can proceed based on current step
-  const canProceedFromDomain = !!selectedRouteId;
-  const canProceedFromRouting = selectedRoute?.https_status === 'ok';
+  const canProceedFromMode = !!installMode;
+  const canProceedFromDomain = installMode === 'without-proxy' || !!selectedRouteId;
+  const canProceedFromRouting = installMode === 'without-proxy' || selectedRoute?.https_status === 'ok';
   const canProceedFromPreflight = preflightChecks.every(c => c.status === 'passed');
+
+  // Get the steps based on install mode
+  const getSteps = (): SetupStep[] => {
+    if (installMode === 'without-proxy') {
+      return ['mode', 'preflight', 'install', 'credentials'];
+    }
+    return ['mode', 'domain', 'routing', 'preflight', 'install', 'credentials'];
+  };
+
+  const steps = getSteps();
 
   // Handle route verification via Caddy
   const handleVerifyRoute = async () => {
@@ -317,17 +334,23 @@ echo "✅ Supabase installé avec succès"
           <div className="lg:col-span-1">
             <Card>
               <CardContent className="p-4 space-y-2">
-                {(['domain', 'routing', 'preflight', 'install', 'credentials'] as SetupStep[]).map((step, idx) => {
+                {steps.map((step, idx) => {
                   const isActive = currentStep === step;
-                  const isPast = ['domain', 'routing', 'preflight', 'install', 'credentials'].indexOf(currentStep) > idx;
+                  const currentIdx = steps.indexOf(currentStep);
+                  const isPast = currentIdx > idx;
                   
                   const labels: Record<SetupStep, string> = {
-                    domain: '1. Domaine',
-                    routing: '2. Routage',
-                    preflight: '3. Préflight',
-                    install: '4. Installation',
-                    credentials: '5. Identifiants',
+                    mode: '1. Mode',
+                    domain: '2. Domaine',
+                    routing: '3. Routage',
+                    preflight: installMode === 'without-proxy' ? '2. Préflight' : '4. Préflight',
+                    install: installMode === 'without-proxy' ? '3. Installation' : '5. Installation',
+                    credentials: installMode === 'without-proxy' ? '4. Identifiants' : '6. Identifiants',
                   };
+                  
+                  // Renumber based on actual position
+                  const stepNumber = idx + 1;
+                  const displayLabel = `${stepNumber}. ${labels[step].split('. ')[1]}`;
                   
                   return (
                     <button
@@ -347,7 +370,7 @@ echo "✅ Supabase installé avec succès"
                       ) : (
                         <div className={`w-5 h-5 rounded-full border-2 ${isActive ? 'border-primary' : 'border-muted-foreground'}`} />
                       )}
-                      <span className="text-sm font-medium">{labels[step]}</span>
+                      <span className="text-sm font-medium">{displayLabel}</span>
                     </button>
                   );
                 })}
@@ -357,8 +380,102 @@ echo "✅ Supabase installé avec succès"
 
           {/* Step Content */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Step 1: Domain Selection */}
-            {currentStep === 'domain' && (
+            {/* Step 0: Mode Selection */}
+            {currentStep === 'mode' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Database className="w-5 h-5" />
+                    Mode d'installation
+                  </CardTitle>
+                  <CardDescription>
+                    Choisissez comment installer Supabase
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid gap-4">
+                    {/* With proxy option */}
+                    <button
+                      onClick={() => setInstallMode('with-proxy')}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        installMode === 'with-proxy'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`p-2 rounded-lg ${installMode === 'with-proxy' ? 'bg-primary/10' : 'bg-muted'}`}>
+                          <Globe className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-semibold flex items-center gap-2">
+                            Avec domaine HTTPS
+                            <Badge variant="default" className="text-xs">Recommandé</Badge>
+                          </h4>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Configure un reverse proxy (Caddy/Nginx) avec certificat SSL.
+                            Accès sécurisé via un nom de domaine personnalisé.
+                          </p>
+                          {hasProxyReady && (
+                            <Badge variant="outline" className="mt-2 text-green-500 border-green-500">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Proxy disponible
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Without proxy option */}
+                    <button
+                      onClick={() => setInstallMode('without-proxy')}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        installMode === 'without-proxy'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`p-2 rounded-lg ${installMode === 'without-proxy' ? 'bg-primary/10' : 'bg-muted'}`}>
+                          <Database className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-semibold">Sans proxy (ports directs)</h4>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Installation rapide. Accès via IP:port sans HTTPS.
+                            Vous pourrez configurer le proxy plus tard.
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+
+                  {installMode === 'without-proxy' && (
+                    <Alert>
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Attention</AlertTitle>
+                      <AlertDescription>
+                        Sans HTTPS, les connexions ne seront pas chiffrées. 
+                        Cette configuration est adaptée pour le développement ou un réseau privé.
+                        Vous pouvez configurer Caddy ou Nginx après l'installation.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={() => setCurrentStep(installMode === 'without-proxy' ? 'preflight' : 'domain')}
+                      disabled={!canProceedFromMode}
+                    >
+                      Suivant
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Step 1: Domain Selection (only with proxy) */}
+            {currentStep === 'domain' && installMode === 'with-proxy' && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -432,8 +549,8 @@ echo "✅ Supabase installé avec succès"
               </Card>
             )}
 
-            {/* Step 2: Routing Verification */}
-            {currentStep === 'routing' && selectedRoute && (
+            {/* Step 2: Routing Verification (only with proxy) */}
+            {currentStep === 'routing' && installMode === 'with-proxy' && selectedRoute && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -560,7 +677,7 @@ echo "✅ Supabase installé avec succès"
                   </Button>
 
                   <div className="flex justify-between">
-                    <Button variant="outline" onClick={() => setCurrentStep('routing')}>
+                    <Button variant="outline" onClick={() => setCurrentStep(installMode === 'without-proxy' ? 'mode' : 'routing')}>
                       Retour
                     </Button>
                     <Button
@@ -575,7 +692,7 @@ echo "✅ Supabase installé avec succès"
             )}
 
             {/* Step 4: Installation */}
-            {currentStep === 'install' && selectedRoute && (
+            {currentStep === 'install' && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -598,10 +715,18 @@ echo "✅ Supabase installé avec succès"
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
                         Générer des secrets aléatoires sécurisés
                       </li>
-                      <li className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                        Configurer l'URL publique: https://{selectedRoute.full_domain}
-                      </li>
+                      {installMode === 'with-proxy' && selectedRoute && (
+                        <li className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-green-500" />
+                          Configurer l'URL publique: https://{selectedRoute.full_domain}
+                        </li>
+                      )}
+                      {installMode === 'without-proxy' && (
+                        <li className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                          Accès via IP:port (sans HTTPS)
+                        </li>
+                      )}
                       <li className="flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-green-500" />
                         Démarrer tous les containers (DB, Auth, REST, Realtime, Storage, Studio)
@@ -612,6 +737,22 @@ echo "✅ Supabase installé avec succès"
                       </li>
                     </ul>
                   </div>
+
+                  {installMode === 'without-proxy' && (
+                    <Alert>
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTitle>Installation sans HTTPS</AlertTitle>
+                      <AlertDescription>
+                        Supabase sera accessible sur les ports suivants :
+                        <ul className="mt-2 text-xs font-mono">
+                          <li>• API REST: http://IP:8000</li>
+                          <li>• Studio: http://IP:3000</li>
+                          <li>• Auth: http://IP:9999</li>
+                        </ul>
+                        Pensez à configurer un reverse proxy ensuite pour la production.
+                      </AlertDescription>
+                    </Alert>
+                  )}
 
                   <Alert>
                     <AlertTriangle className="h-4 w-4" />
@@ -624,7 +765,7 @@ echo "✅ Supabase installé avec succès"
 
                   <Button
                     onClick={handleInstall}
-                    disabled={isInstalling || !gating.allMet}
+                    disabled={isInstalling || !gating.dockerInstalled || !gating.dockerComposeInstalled}
                     className="w-full"
                     size="lg"
                   >
@@ -654,12 +795,20 @@ echo "✅ Supabase installé avec succès"
             {currentStep === 'credentials' && (
               <SupabaseCredentials
                 credentials={{
-                  supabase_url: supabaseInstance?.supabase_url || `https://${selectedRoute?.full_domain}`,
+                  supabase_url: supabaseInstance?.supabase_url || (
+                    installMode === 'with-proxy' && selectedRoute
+                      ? `https://${selectedRoute.full_domain}`
+                      : 'http://[SERVER_IP]:8000'
+                  ),
                   supabase_anon_key: supabaseInstance?.supabase_anon_key,
                   supabase_service_role_key: supabaseInstance?.supabase_service_role_key,
                   supabase_jwt_secret: supabaseInstance?.supabase_jwt_secret,
                   supabase_postgres_password: supabaseInstance?.supabase_postgres_password,
-                  studio_url: `${supabaseInstance?.supabase_url || `https://${selectedRoute?.full_domain}`}/studio`,
+                  studio_url: supabaseInstance?.supabase_url 
+                    ? `${supabaseInstance.supabase_url}/studio`
+                    : (installMode === 'with-proxy' && selectedRoute
+                        ? `https://${selectedRoute.full_domain}/studio`
+                        : 'http://[SERVER_IP]:3000'),
                 }}
                 showSecurityWarning
               />
