@@ -270,16 +270,6 @@ function computeProxyStatus(
       lastOrder: lastInstallOrder,
     };
   }
-
-  
-  // Check if installation is in progress
-  if (lastInstallOrder?.status === 'running' || lastInstallOrder?.status === 'pending') {
-    return { 
-      status: 'installing', 
-      label: 'Installation en cours', 
-      lastOrder: lastInstallOrder 
-    };
-  }
   
   // Parse runtime verification from last completed verify order
   let runtimeVerification: RuntimeVerification | null = null;
