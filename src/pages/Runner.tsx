@@ -1,4 +1,4 @@
-import { Server, RefreshCw, Terminal, ExternalLink, Copy, HardDrive } from 'lucide-react';
+import { Server, RefreshCw, Terminal, ExternalLink, HardDrive } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -20,16 +20,6 @@ const Runner = () => {
 
   const hasRunners = (runners?.length ?? 0) > 0;
   const hasInfra = (infrastructures?.length ?? 0) > 0;
-
-  // Generate install script for copy
-  const installScript = runnerBaseUrl 
-    ? `curl -fsSL "${runnerBaseUrl}/install" | sudo bash`
-    : '';
-
-  const handleCopyScript = () => {
-    navigator.clipboard.writeText(installScript);
-    toast.success('Script copié dans le presse-papiers');
-  };
 
   if (settingsLoading) {
     return (
@@ -95,13 +85,7 @@ const Runner = () => {
             
             {runnerBaseUrl ? (
               <div className="space-y-4">
-                <div className="bg-muted/30 rounded-lg p-4 font-mono text-sm text-left max-w-xl mx-auto overflow-x-auto">
-                  <code className="text-primary">{installScript}</code>
-                </div>
-                <Button onClick={handleCopyScript} variant="default">
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copier le script d'installation
-                </Button>
+                <InstallScript baseUrl={runnerBaseUrl} />
               </div>
             ) : (
               <div className="space-y-2">
