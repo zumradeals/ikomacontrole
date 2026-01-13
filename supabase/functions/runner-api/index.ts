@@ -7,7 +7,7 @@ const corsHeaders = {
 }
 
 // === CONSTANTS ===
-const RUNNER_VERSION = '2.1.0'
+const RUNNER_VERSION = '2.2.0'
 const HEARTBEAT_INTERVAL_SECONDS = 30
 const POLL_INTERVAL_SECONDS = 5
 const RUNNER_OFFLINE_THRESHOLD_SECONDS = 60
@@ -956,66 +956,66 @@ send_report() {
     -d "\$PAYLOAD" > /dev/null
 }
 
-poll_orders() {
-  ORDERS=\$(curl -s -X GET "\$API_URL/orders/poll" -H "x-runner-token: \$TOKEN" 2>&1)
+poll_and_claim_orders() {
+  # Use /orders/claim for atomic order acquisition (prevents race conditions)
+  CLAIM_RESPONSE=\$(curl -s -X POST "\$API_URL/orders/claim" -H "x-runner-token: \$TOKEN" -H "Content-Type: application/json" 2>&1)
   
-  if ! echo "\$ORDERS" | grep -q '"success":true'; then
+  if ! echo "\$CLAIM_RESPONSE" | grep -q '"success":true'; then
+    log "Claim request failed: \$CLAIM_RESPONSE"
     return
   fi
   
-  ORDER_COUNT=\$(echo "\$ORDERS" | jq -r '.orders | length' 2>/dev/null || echo 0)
+  # Check if we got an order
+  ORDER_ID=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.id // empty' 2>/dev/null)
   
-  if [ "\$ORDER_COUNT" -gt 0 ]; then
-    log "Found \$ORDER_COUNT pending order(s)"
-    
-    for i in \$(seq 0 \$((ORDER_COUNT - 1))); do
-      ORDER_ID=\$(echo "\$ORDERS" | jq -r ".orders[\$i].id")
-      ORDER_NAME=\$(echo "\$ORDERS" | jq -r ".orders[\$i].name")
-      ORDER_CMD=\$(echo "\$ORDERS" | jq -r ".orders[\$i].command")
-      
-      log "Executing order: \$ORDER_NAME (\$ORDER_ID)"
-      
-      STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      send_report "\$ORDER_ID" "running" "null" "" "" "\$STARTED_AT" "null" ""
-      
-      STDOUT_FILE=\$(mktemp)
-      STDERR_FILE=\$(mktemp)
-      
-      set +e
-      bash -c "\$ORDER_CMD" > "\$STDOUT_FILE" 2> "\$STDERR_FILE"
-      EXIT_CODE=\$?
-      set -e
-      
-      FINISHED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      STDOUT_TAIL=\$(tail -c 10000 "\$STDOUT_FILE" 2>/dev/null || echo "")
-      STDERR_TAIL=\$(tail -c 10000 "\$STDERR_FILE" 2>/dev/null || echo "")
-      
-      if [ "\$EXIT_CODE" -eq 0 ]; then
-        STATUS="applied"
-        log "Order completed (exit_code=0)"
-        
-        # Extract JSON result from stdout
-        RESULT=""
-        JSON_LINE=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
-        if [ -n "\$JSON_LINE" ] && echo "\$JSON_LINE" | jq . >/dev/null 2>&1; then
-          RESULT="\$JSON_LINE"
-          log "Extracted JSON result"
-        fi
-        
-        if [ -n "\$RESULT" ]; then
-          send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
-        else
-          send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
-        fi
-      else
-        STATUS="failed"
-        log "Order failed (exit_code=\$EXIT_CODE)"
-        send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
-      fi
-      
-      rm -f "\$STDOUT_FILE" "\$STDERR_FILE"
-    done
+  if [ -z "\$ORDER_ID" ] || [ "\$ORDER_ID" = "null" ]; then
+    # No pending orders - this is normal
+    return
   fi
+  
+  ORDER_NAME=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.name // "Unknown"')
+  ORDER_CMD=\$(echo "\$CLAIM_RESPONSE" | jq -r '.order.command // ""')
+  
+  log "Claimed order: \$ORDER_NAME (\$ORDER_ID)"
+  
+  STARTED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  
+  STDOUT_FILE=\$(mktemp)
+  STDERR_FILE=\$(mktemp)
+  
+  set +e
+  bash -c "\$ORDER_CMD" > "\$STDOUT_FILE" 2> "\$STDERR_FILE"
+  EXIT_CODE=\$?
+  set -e
+  
+  FINISHED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  STDOUT_TAIL=\$(tail -c 10000 "\$STDOUT_FILE" 2>/dev/null || echo "")
+  STDERR_TAIL=\$(tail -c 10000 "\$STDERR_FILE" 2>/dev/null || echo "")
+  
+  if [ "\$EXIT_CODE" -eq 0 ]; then
+    STATUS="applied"
+    log "Order completed (exit_code=0)"
+    
+    # Extract JSON result from stdout
+    RESULT=""
+    JSON_LINE=\$(grep -E '^\\{.*\\}\$' "\$STDOUT_FILE" | tail -1 2>/dev/null || echo "")
+    if [ -n "\$JSON_LINE" ] && echo "\$JSON_LINE" | jq . >/dev/null 2>&1; then
+      RESULT="\$JSON_LINE"
+      log "Extracted JSON result"
+    fi
+    
+    if [ -n "\$RESULT" ]; then
+      send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" "\$RESULT"
+    else
+      send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
+    fi
+  else
+    STATUS="failed"
+    log "Order failed (exit_code=\$EXIT_CODE)"
+    send_report "\$ORDER_ID" "\$STATUS" "\$EXIT_CODE" "\$STDOUT_TAIL" "\$STDERR_TAIL" "\$STARTED_AT" "\$FINISHED_AT" ""
+  fi
+  
+  rm -f "\$STDOUT_FILE" "\$STDERR_FILE"
 }
 
 log "Starting Ikoma Runner v\$RUNNER_VERSION"
@@ -1032,7 +1032,7 @@ while true; do
     LAST_HEARTBEAT=\$CURRENT_TIME
   fi
   
-  poll_orders
+  poll_and_claim_orders
   sleep \$POLL_INTERVAL
 done
 RUNNER_SCRIPT_EOF
