@@ -12,17 +12,13 @@ import {
   Cloud,
   HardDrive,
   ExternalLink,
-  RefreshCw,
-  Terminal,
   GitBranch,
   Container,
   Shield,
   Globe,
   Network,
   Lock,
-  Scan,
-  RotateCcw,
-  Code
+  RotateCcw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -192,36 +188,6 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
 
         {/* Actions - scrollable on mobile */}
         <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setAutoDetectDialogOpen(true)}
-            disabled={associatedRunners.length === 0}
-            className="shrink-0"
-          >
-            <Scan className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Auto-détection</span>
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setOrdersDialogOpen(true)}
-            disabled={associatedRunners.length === 0}
-            className="shrink-0"
-          >
-            <Terminal className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Playbooks</span>
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => setCustomOrderDialogOpen(true)}
-            disabled={associatedRunners.length === 0}
-            className="shrink-0"
-          >
-            <Code className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Custom</span>
-          </Button>
           <Button variant="outline" size="sm" onClick={onEdit} className="shrink-0">
             <Pencil className="w-4 h-4 sm:mr-2" />
             <span className="hidden sm:inline">Modifier</span>
