@@ -2,7 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppModeProvider } from "@/contexts/AppModeContext";
 import { AuthProvider } from "@/hooks/useAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -15,8 +15,7 @@ import SupabaseSetup from "./pages/SupabaseSetup";
 import Deployer from "./pages/Deployer";
 import DeployerWizard from "./pages/DeployerWizard";
 import Gateway from "./pages/Gateway";
-import Live from "./pages/Live";
-import ActivityPage from "./pages/ActivityPage";
+import Observability from "./pages/Observability";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 
@@ -45,8 +44,10 @@ const App = () => (
                       <Route path="/deployer" element={<Deployer />} />
                       <Route path="/deployer/new" element={<DeployerWizard />} />
                       <Route path="/gateway" element={<Gateway />} />
-                      <Route path="/live" element={<Live />} />
-                      <Route path="/activity" element={<ActivityPage />} />
+                      <Route path="/observability" element={<Observability />} />
+                      {/* Redirects for old routes */}
+                      <Route path="/live" element={<Navigate to="/observability" replace />} />
+                      <Route path="/activity" element={<Navigate to="/observability" replace />} />
                       <Route path="/settings" element={<SettingsPage />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>

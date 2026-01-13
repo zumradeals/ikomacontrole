@@ -6,14 +6,12 @@ import {
   Layers, 
   Rocket, 
   Network, 
-  Radio, 
-  Activity, 
+  Eye, 
   Settings,
   ChevronLeft,
   ChevronRight,
   Hexagon,
-  Menu,
-  X
+  Menu
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -21,28 +19,39 @@ import { ModeToggle } from './ModeToggle';
 import { UserMenu } from './UserMenu';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { useAppMode } from '@/contexts/AppModeContext';
 
-const navItems = [
+interface NavItem {
+  path: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  expertOnly?: boolean;
+}
+
+// Navigation items with French labels and expert mode flags
+const navItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/runner', label: 'Runner', icon: Server },
-  { path: '/infra', label: 'Infra', icon: HardDrive },
-  { path: '/platform', label: 'Platform', icon: Layers },
-  { path: '/deployer', label: 'Deployer', icon: Rocket },
-  { path: '/gateway', label: 'Gateway', icon: Network },
-  { path: '/live', label: 'Live', icon: Radio },
-  { path: '/activity', label: 'Activity', icon: Activity },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/infra', label: 'Serveurs', icon: HardDrive },
+  { path: '/runner', label: 'Agents', icon: Server },
+  { path: '/platform', label: 'Services', icon: Layers },
+  { path: '/deployer', label: 'Déploiements', icon: Rocket, expertOnly: true },
+  { path: '/gateway', label: 'Routage', icon: Network, expertOnly: true },
+  { path: '/observability', label: 'Observabilité', icon: Eye, expertOnly: true },
+  { path: '/settings', label: 'Paramètres', icon: Settings },
 ];
 
 // Mobile Header with burger menu
 export function MobileHeader() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const { isExpert } = useAppMode();
 
   // Close sheet on navigation
   useEffect(() => {
     setOpen(false);
   }, [location.pathname]);
+
+  const visibleItems = navItems.filter(item => !item.expertOnly || isExpert);
 
   return (
     <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-sidebar border-b border-sidebar-border flex items-center justify-between px-4 z-50">
@@ -70,7 +79,7 @@ export function MobileHeader() {
           </div>
 
           <nav className="flex-1 p-3 space-y-1 overflow-y-auto terminal-scroll">
-            {navItems.map((item) => {
+            {visibleItems.map((item) => {
               const isActive = location.pathname === item.path;
               const Icon = item.icon;
               
@@ -110,6 +119,9 @@ export function MobileHeader() {
 export function Sidebar() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const { isExpert } = useAppMode();
+
+  const visibleItems = navItems.filter(item => !item.expertOnly || isExpert);
 
   return (
     <>
@@ -145,7 +157,7 @@ export function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto terminal-scroll">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
             
