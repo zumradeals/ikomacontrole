@@ -166,6 +166,7 @@ const SERVICE_DEFINITIONS = [
 
 const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 const RUNNER_OFFLINE_THRESHOLD_MS = 60 * 1000; // 60 seconds
+const VERIFY_STUCK_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 function getCapabilityValue(capabilities: Record<string, unknown>, key: string): string {
   const value = capabilities?.[key];
@@ -176,15 +177,15 @@ function getCapabilityValue(capabilities: Record<string, unknown>, key: string):
 // Parse runtime verification from order stdout for Caddy
 function parseRuntimeVerificationFromOrder(order: Order, serviceName: string = 'caddy'): RuntimeVerification | null {
   if (!order.stdout_tail) return null;
-  
+
   try {
     const regex = new RegExp(`\\{[\\s\\S]*"service"\\s*:\\s*"${serviceName}"[\\s\\S]*\\}`);
     const jsonMatch = order.stdout_tail.match(regex);
     if (!jsonMatch) return null;
-    
+
     const parsed = JSON.parse(jsonMatch[0]);
     if (parsed.service !== serviceName) return null;
-    
+
     return {
       installed: parsed.installed === true,
       running: parsed.running === true,
@@ -212,9 +213,9 @@ function computeProxyStatus(
   orders: Order[],
   gating: Omit<PlatformGating, 'caddyVerified' | 'caddyHttpsReady' | 'nginxVerified' | 'nginxHttpsReady' | 'proxyReady'>,
   runnerLastSeenAt: string | null | undefined
-): { 
-  status: ServiceStatus; 
-  label: string; 
+): {
+  status: ServiceStatus;
+  label: string;
   lastOrder?: Order;
   runtimeVerification?: RuntimeVerification | null;
   lastVerifiedAt?: Date | null;
@@ -231,26 +232,45 @@ function computeProxyStatus(
   const capabilityKey = serviceName === 'nginx' ? 'nginx.installed' : 'caddy.installed';
 
   // Find verify orders
-  const verifyOrders = orders.filter(o => 
-    o.description?.includes(`[${verifyPlaybookId}]`)
-  );
+  const verifyOrders = orders.filter((o) => o.description?.includes(`[${verifyPlaybookId}]`));
   const lastVerifyOrder = verifyOrders[0];
-  
+
   // Find install orders
-  const installOrders = orders.filter(o => 
-    o.description?.includes(`[${installPlaybookId}]`)
-  );
+  const installOrders = orders.filter((o) => o.description?.includes(`[${installPlaybookId}]`));
   const lastInstallOrder = installOrders[0];
-  
-  // Check if verification is in progress
-  if (lastVerifyOrder?.status === 'running' || lastVerifyOrder?.status === 'pending') {
-    return { 
-      status: 'checking', 
-      label: 'Vérification...', 
+
+  // If a verify order is pending/running for too long, consider it stuck (so it doesn't block UI forever)
+  if (lastVerifyOrder && (lastVerifyOrder.status === 'running' || lastVerifyOrder.status === 'pending')) {
+    const startedAt = new Date(lastVerifyOrder.started_at || lastVerifyOrder.created_at);
+    const ageMs = isNaN(startedAt.getTime()) ? 0 : Date.now() - startedAt.getTime();
+
+    if (ageMs < VERIFY_STUCK_THRESHOLD_MS) {
+      return {
+        status: 'checking',
+        label: 'Vérification...',
+        lastOrder: lastVerifyOrder,
+        isVerifying: true,
+      };
+    }
+
+    return {
+      status: 'stale',
+      label: 'Vérification bloquée',
       lastOrder: lastVerifyOrder,
-      isVerifying: true,
+      staleReason: `Ordre de vérification en attente depuis ${Math.max(1, Math.round(ageMs / 60000))} min`,
+      isVerifying: false,
     };
   }
+
+  // Check if installation is in progress
+  if (lastInstallOrder?.status === 'running' || lastInstallOrder?.status === 'pending') {
+    return {
+      status: 'installing',
+      label: 'Installation en cours',
+      lastOrder: lastInstallOrder,
+    };
+  }
+
   
   // Check if installation is in progress
   if (lastInstallOrder?.status === 'running' || lastInstallOrder?.status === 'pending') {
