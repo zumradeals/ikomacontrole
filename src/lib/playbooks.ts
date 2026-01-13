@@ -1063,10 +1063,84 @@ echo "✓ Caddy installed: $(caddy version)"
 `,
   },
   {
+    id: 'proxy.caddy.verify',
+    group: 'proxy',
+    name: 'Vérifier Caddy (Runtime)',
+    description: 'Vérifie l\'état runtime de Caddy avec preuve structurée',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Globe,
+    prerequisites: [],
+    verifies: ['caddy.verified'],
+    command: `#!/bin/bash
+# Runtime verification of Caddy - returns structured JSON proof
+
+set -e
+
+INSTALLED="false"
+RUNNING="false"
+VERSION="unknown"
+HTTPS_READY="false"
+ERROR=""
+
+# Check if Caddy is installed
+if command -v caddy &>/dev/null; then
+  INSTALLED="true"
+  VERSION=\$(caddy version 2>/dev/null | head -1 | awk '{print \$1}' || echo "unknown")
+  
+  # Check if Caddy service is running
+  if systemctl is-active --quiet caddy 2>/dev/null; then
+    RUNNING="true"
+    
+    # Check if Caddy can bind to HTTPS port (443)
+    if ss -tlnp 2>/dev/null | grep -q ":443.*caddy"; then
+      HTTPS_READY="true"
+    elif ss -tlnp 2>/dev/null | grep -q ":443"; then
+      HTTPS_READY="true"
+    elif curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 http://localhost:2019/config/ 2>/dev/null | grep -qE "^(200|404)$"; then
+      HTTPS_READY="true"
+    fi
+  else
+    ERROR="Caddy service is not running"
+  fi
+else
+  ERROR="Caddy is not installed"
+fi
+
+CHECKED_AT=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+cat <<EOF
+{
+  "service": "caddy",
+  "installed": \$INSTALLED,
+  "running": \$RUNNING,
+  "version": "\$VERSION",
+  "https_ready": \$HTTPS_READY,
+  "checked_at": "\$CHECKED_AT",
+  "error": \$([ -n "\$ERROR" ] && echo '\"'\$ERROR'\"' || echo 'null'),
+  "capabilities": {
+    "caddy.installed": \$([ "\$INSTALLED" = "true" ] && echo '"installed"' || echo '"not_installed"'),
+    "caddy.running": \$([ "\$RUNNING" = "true" ] && echo '"running"' || echo '"stopped"'),
+    "caddy.https_ready": \$([ "\$HTTPS_READY" = "true" ] && echo '"ready"' || echo '"not_ready"'),
+    "caddy.verified": \$([ "\$INSTALLED" = "true" ] && [ "\$RUNNING" = "true" ] && echo '"verified"' || echo '"unverified"'),
+    "caddy.last_verified": "\$CHECKED_AT"
+  }
+}
+EOF
+
+if [ "\$INSTALLED" = "true" ] && [ "\$RUNNING" = "true" ]; then
+  exit 0
+else
+  exit 1
+fi
+`,
+  },
+  {
     id: 'proxy.caddy.status',
     group: 'proxy',
     name: 'Status Caddy',
-    description: 'Vérifie l\'état du service Caddy',
+    description: 'Affiche l\'état détaillé du service Caddy',
     level: 'simple',
     risk: 'low',
     duration: '~5s',
@@ -1086,7 +1160,6 @@ fi
 echo "Version: \$(caddy version)"
 echo ""
 
-# Check service status
 if systemctl is-active --quiet caddy 2>/dev/null; then
   echo "✓ Service: Running"
   systemctl status caddy --no-pager | head -10

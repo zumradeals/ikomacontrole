@@ -4,15 +4,27 @@ import { useRunners } from './useRunners';
 import { useOrders, Order } from './useOrders';
 import { Database, Zap, Globe, BarChart3, LucideIcon } from 'lucide-react';
 
-// Service status enum
+// Service status enum - Updated with runtime verification states
 export type ServiceStatus = 
   | 'not_configured'    // No infra selected or no runner
   | 'precheck_failed'   // Prerequisites not met
   | 'ready_to_install'  // Prerequisites OK, ready to install
   | 'installing'        // Installation in progress
-  | 'installed'         // Service installed and verified
+  | 'installed'         // Service installed and verified (runtime proof)
   | 'failed'            // Installation failed
-  | 'stopped';          // Service installed but stopped
+  | 'stopped'           // Service installed but stopped
+  | 'unknown'           // No runtime verification ever done
+  | 'stale'             // Verification is old or runner offline
+  | 'checking';         // Verification in progress
+
+export interface RuntimeVerification {
+  installed: boolean;
+  running: boolean;
+  version: string;
+  https_ready: boolean;
+  checked_at: string | null;
+  error: string | null;
+}
 
 export interface PlatformService {
   id: string;
@@ -29,10 +41,16 @@ export interface PlatformService {
     precheck?: string;
     install: string[];
     status?: string;
+    verify?: string;
     logs?: string;
   };
   prerequisites: string[];
   lastOrder?: Order;
+  // Runtime verification data
+  runtimeVerification?: RuntimeVerification | null;
+  lastVerifiedAt?: Date | null;
+  staleReason?: string | null;
+  isVerifying?: boolean;
 }
 
 export interface PlatformGating {
@@ -43,6 +61,9 @@ export interface PlatformGating {
   dockerComposeInstalled: boolean;
   allMet: boolean;
   missing: string[];
+  // Caddy runtime status for deployment gating
+  caddyVerified: boolean;
+  caddyHttpsReady: boolean;
 }
 
 interface Runner {
@@ -51,9 +72,10 @@ interface Runner {
   status: string;
   infrastructure_id: string | null;
   capabilities: Record<string, unknown>;
+  last_seen_at?: string | null;
 }
 
-// Service definitions
+// Service definitions with verify playbook for Caddy
 const SERVICE_DEFINITIONS = [
   {
     id: 'caddy',
@@ -67,7 +89,8 @@ const SERVICE_DEFINITIONS = [
     playbooks: {
       precheck: undefined,
       install: ['proxy.caddy.install'],
-      status: 'maintenance.services.status',
+      status: 'proxy.caddy.status',
+      verify: 'proxy.caddy.verify', // Runtime verification playbook
     },
     prerequisites: [],
   },
@@ -119,17 +142,223 @@ const SERVICE_DEFINITIONS = [
   },
 ];
 
+const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+const RUNNER_OFFLINE_THRESHOLD_MS = 60 * 1000; // 60 seconds
+
 function getCapabilityValue(capabilities: Record<string, unknown>, key: string): string {
   const value = capabilities?.[key];
   if (typeof value === 'string') return value;
   return 'unknown';
 }
 
+// Parse runtime verification from order stdout
+function parseRuntimeVerificationFromOrder(order: Order): RuntimeVerification | null {
+  if (!order.stdout_tail) return null;
+  
+  try {
+    const jsonMatch = order.stdout_tail.match(/\{[\s\S]*"service"\s*:\s*"caddy"[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (parsed.service !== 'caddy') return null;
+    
+    return {
+      installed: parsed.installed === true,
+      running: parsed.running === true,
+      version: parsed.version || 'unknown',
+      https_ready: parsed.https_ready === true,
+      checked_at: parsed.checked_at || null,
+      error: parsed.error || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Check if runner is online based on last seen
+function isRunnerOnline(lastSeenAt: string | null | undefined): boolean {
+  if (!lastSeenAt) return false;
+  const lastSeen = new Date(lastSeenAt);
+  return Date.now() - lastSeen.getTime() < RUNNER_OFFLINE_THRESHOLD_MS;
+}
+
+// Compute Caddy service status with runtime verification
+function computeCaddyStatus(
+  capabilities: Record<string, unknown>,
+  orders: Order[],
+  gating: Omit<PlatformGating, 'caddyVerified' | 'caddyHttpsReady'>,
+  runnerLastSeenAt: string | null | undefined
+): { 
+  status: ServiceStatus; 
+  label: string; 
+  lastOrder?: Order;
+  runtimeVerification?: RuntimeVerification | null;
+  lastVerifiedAt?: Date | null;
+  staleReason?: string | null;
+  isVerifying?: boolean;
+} {
+  // If no infrastructure or runner, not configured
+  if (!gating.hasInfra || !gating.hasRunner) {
+    return { status: 'not_configured', label: 'Non configuré' };
+  }
+
+  // Find verify orders for Caddy
+  const verifyOrders = orders.filter(o => 
+    o.description?.includes('[proxy.caddy.verify]')
+  );
+  const lastVerifyOrder = verifyOrders[0];
+  
+  // Find install orders
+  const installOrders = orders.filter(o => 
+    o.description?.includes('[proxy.caddy.install]')
+  );
+  const lastInstallOrder = installOrders[0];
+  
+  // Check if verification is in progress
+  if (lastVerifyOrder?.status === 'running' || lastVerifyOrder?.status === 'pending') {
+    return { 
+      status: 'checking', 
+      label: 'Vérification...', 
+      lastOrder: lastVerifyOrder,
+      isVerifying: true,
+    };
+  }
+  
+  // Check if installation is in progress
+  if (lastInstallOrder?.status === 'running' || lastInstallOrder?.status === 'pending') {
+    return { 
+      status: 'installing', 
+      label: 'Installation en cours', 
+      lastOrder: lastInstallOrder 
+    };
+  }
+  
+  // Parse runtime verification from last completed verify order
+  let runtimeVerification: RuntimeVerification | null = null;
+  let lastVerifiedAt: Date | null = null;
+  
+  if (lastVerifyOrder?.status === 'completed') {
+    runtimeVerification = parseRuntimeVerificationFromOrder(lastVerifyOrder);
+    if (runtimeVerification?.checked_at) {
+      lastVerifiedAt = new Date(runtimeVerification.checked_at);
+    }
+  }
+  
+  // Check for stale conditions
+  const runnerOnline = isRunnerOnline(runnerLastSeenAt);
+  
+  // Runner offline = stale
+  if (!runnerOnline && gating.hasRunner) {
+    const declaredInstalled = getCapabilityValue(capabilities, 'caddy.installed') === 'installed';
+    return { 
+      status: 'stale', 
+      label: declaredInstalled ? 'État incertain' : 'À vérifier',
+      staleReason: 'Runner hors ligne',
+      runtimeVerification,
+      lastVerifiedAt,
+    };
+  }
+  
+  // No runtime verification ever done
+  if (!runtimeVerification && !lastVerifyOrder) {
+    const declaredInstalled = getCapabilityValue(capabilities, 'caddy.installed') === 'installed';
+    if (declaredInstalled) {
+      // Has declared capability but no runtime proof
+      return { 
+        status: 'stale', 
+        label: 'À vérifier',
+        staleReason: 'État déclaré sans preuve runtime',
+        lastVerifiedAt: null,
+      };
+    }
+    return { 
+      status: 'unknown', 
+      label: 'Statut inconnu' 
+    };
+  }
+  
+  // Verification failed (order failed)
+  if (lastVerifyOrder?.status === 'failed') {
+    // Check if we can still parse a result
+    if (runtimeVerification) {
+      if (!runtimeVerification.installed) {
+        return { 
+          status: 'not_installed' as ServiceStatus, 
+          label: 'Non installé',
+          runtimeVerification,
+          lastVerifiedAt,
+        };
+      }
+      if (!runtimeVerification.running) {
+        return { 
+          status: 'stopped', 
+          label: 'Arrêté',
+          runtimeVerification,
+          lastVerifiedAt,
+        };
+      }
+    }
+    return { 
+      status: 'failed', 
+      label: 'Échec vérification', 
+      lastOrder: lastVerifyOrder 
+    };
+  }
+  
+  // Check verification age
+  if (lastVerifiedAt) {
+    const age = Date.now() - lastVerifiedAt.getTime();
+    if (age > STALE_THRESHOLD_MS) {
+      return { 
+        status: 'stale', 
+        label: 'Vérification périmée',
+        staleReason: `Dernière vérification il y a ${Math.round(age / 60000)} min`,
+        runtimeVerification,
+        lastVerifiedAt,
+      };
+    }
+  }
+  
+  // Runtime verified
+  if (runtimeVerification) {
+    if (!runtimeVerification.installed) {
+      return { 
+        status: 'ready_to_install', 
+        label: 'Prêt à installer',
+        runtimeVerification,
+        lastVerifiedAt,
+      };
+    }
+    if (!runtimeVerification.running) {
+      return { 
+        status: 'stopped', 
+        label: 'Arrêté',
+        runtimeVerification,
+        lastVerifiedAt,
+      };
+    }
+    // Installed and running = verified
+    return { 
+      status: 'installed', 
+      label: runtimeVerification.https_ready ? 'Actif (HTTPS prêt)' : 'Actif',
+      runtimeVerification,
+      lastVerifiedAt,
+    };
+  }
+  
+  // Fallback: ready to install if never verified
+  return { 
+    status: 'unknown', 
+    label: 'Statut inconnu' 
+  };
+}
+
+// Compute status for other services (non-Caddy)
 function computeServiceStatus(
   service: typeof SERVICE_DEFINITIONS[0],
   capabilities: Record<string, unknown>,
   orders: Order[],
-  gating: PlatformGating
+  gating: Omit<PlatformGating, 'caddyVerified' | 'caddyHttpsReady'>
 ): { status: ServiceStatus; label: string; lastOrder?: Order } {
   // If no infrastructure or runner, not configured
   if (!gating.hasInfra || !gating.hasRunner) {
@@ -198,8 +427,8 @@ export function usePlatformServices(selectedInfraId?: string) {
     return (selectedInfra.capabilities as Record<string, unknown>) || {};
   }, [selectedInfra]);
 
-  // Compute gating
-  const gating: PlatformGating = useMemo(() => {
+  // Compute base gating (without Caddy status yet)
+  const baseGating = useMemo(() => {
     const hasInfra = !!selectedInfra;
     const hasRunner = !!associatedRunner;
     const runnerOnline = associatedRunner?.status === 'online';
@@ -224,10 +453,50 @@ export function usePlatformServices(selectedInfraId?: string) {
     };
   }, [selectedInfra, associatedRunner, capabilities]);
 
+  // Compute Caddy service with runtime verification
+  const caddyService = useMemo(() => {
+    const def = SERVICE_DEFINITIONS.find(s => s.id === 'caddy')!;
+    const caddyStatus = computeCaddyStatus(
+      capabilities, 
+      orders, 
+      baseGating, 
+      associatedRunner?.last_seen_at
+    );
+    
+    return {
+      ...def,
+      status: caddyStatus.status,
+      statusLabel: caddyStatus.label,
+      lastOrder: caddyStatus.lastOrder,
+      runtimeVerification: caddyStatus.runtimeVerification,
+      lastVerifiedAt: caddyStatus.lastVerifiedAt,
+      staleReason: caddyStatus.staleReason,
+      isVerifying: caddyStatus.isVerifying,
+    };
+  }, [capabilities, orders, baseGating, associatedRunner]);
+
+  // Full gating including Caddy status
+  const gating: PlatformGating = useMemo(() => {
+    const caddyVerified = caddyService.status === 'installed';
+    const caddyHttpsReady = caddyService.runtimeVerification?.https_ready === true;
+    
+    return {
+      ...baseGating,
+      caddyVerified,
+      caddyHttpsReady,
+    };
+  }, [baseGating, caddyService]);
+
   // Compute services with status
   const services: PlatformService[] = useMemo(() => {
     return SERVICE_DEFINITIONS.map(def => {
-      const { status, label, lastOrder } = computeServiceStatus(def, capabilities, orders, gating);
+      // Use pre-computed Caddy status
+      if (def.id === 'caddy') {
+        return caddyService;
+      }
+      
+      // For other services, use standard computation
+      const { status, label, lastOrder } = computeServiceStatus(def, capabilities, orders, baseGating);
       return {
         ...def,
         status,
@@ -235,7 +504,7 @@ export function usePlatformServices(selectedInfraId?: string) {
         lastOrder,
       };
     });
-  }, [capabilities, orders, gating]);
+  }, [caddyService, capabilities, orders, baseGating]);
 
   return {
     infrastructures,
