@@ -2553,6 +2553,8 @@ export const PLAYBOOK_GROUPS = {
   },
 };
 
+import { NGINX_PLAYBOOKS } from './nginx-playbooks';
+
 export const ALL_PLAYBOOKS: Playbook[] = [
   ...SYSTEM_PLAYBOOKS,
   ...NETWORK_PLAYBOOKS,
@@ -2560,6 +2562,7 @@ export const ALL_PLAYBOOKS: Playbook[] = [
   ...DOCKER_PLAYBOOKS,
   ...REDIS_PLAYBOOKS,
   ...PROXY_PLAYBOOKS,
+  ...NGINX_PLAYBOOKS,
   ...MONITORING_PLAYBOOKS,
   ...SUPABASE_PLAYBOOKS,
   ...MAINTENANCE_PLAYBOOKS,
