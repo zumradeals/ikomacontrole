@@ -61,6 +61,7 @@ import {
 import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 import { useCaddyRoutes, useAvailableCaddyRoutes, useCreateCaddyRoute, CaddyRoute } from '@/hooks/useCaddyRoutes';
+import { useNginxRoutes, useAvailableNginxRoutes, NginxRoute } from '@/hooks/useNginxRoutes';
 import { useSupabaseInstance } from '@/hooks/usePlatformInstances';
 import { useFrameworkDetection } from '@/hooks/useFrameworkDetection';
 import {
@@ -96,8 +97,11 @@ const targetSchema = z.object({
   infrastructure_id: z.string().uuid().optional(),
 });
 
+type ProxyType = 'caddy' | 'nginx' | 'none';
+
 const domainSchema = z.object({
-  use_caddy: z.boolean(),
+  use_proxy: z.boolean(),
+  proxy_type: z.enum(['caddy', 'nginx', 'none']).default('caddy'),
   route_id: z.string().optional(),
   new_subdomain: z.string().optional(),
 });
@@ -181,7 +185,8 @@ const DeployerWizard = () => {
   const domainForm = useForm<z.infer<typeof domainSchema>>({
     resolver: zodResolver(domainSchema),
     defaultValues: {
-      use_caddy: true,
+      use_proxy: true,
+      proxy_type: 'caddy',
       route_id: '',
       new_subdomain: '',
     },
@@ -240,11 +245,20 @@ const DeployerWizard = () => {
   const selectedInfra = infrastructures?.find(i => i.id === selectedInfrastructureId);
 
   // Get Caddy routes for selected infrastructure
-  const { data: availableRoutes = [] } = useAvailableCaddyRoutes(selectedInfrastructureId);
-  const { data: allRoutes = [] } = useCaddyRoutes(selectedInfrastructureId);
+  const { data: availableCaddyRoutes = [] } = useAvailableCaddyRoutes(selectedInfrastructureId);
+  const { data: allCaddyRoutes = [] } = useCaddyRoutes(selectedInfrastructureId);
+  
+  // Get Nginx routes for selected infrastructure
+  const { data: availableNginxRoutes = [] } = useAvailableNginxRoutes(selectedInfrastructureId);
+  const { data: allNginxRoutes = [] } = useNginxRoutes(selectedInfrastructureId);
 
   // Get Supabase instance for auto-import
   const { data: supabaseInstance } = useSupabaseInstance(selectedInfrastructureId);
+
+  // Get selected proxy type and available routes
+  const proxyType = domainForm.watch('proxy_type');
+  const availableRoutes = proxyType === 'nginx' ? availableNginxRoutes : availableCaddyRoutes;
+  const allRoutes = proxyType === 'nginx' ? allNginxRoutes : allCaddyRoutes;
 
   // Get selected route
   const selectedRouteId = domainForm.watch('route_id');
@@ -344,8 +358,8 @@ const DeployerWizard = () => {
 
   // Domain validation
   const domainValidation = useMemo(() => {
-    const useCaddy = domainForm.watch('use_caddy');
-    if (!useCaddy) return { isValid: true, errors: [] };
+    const useProxy = domainForm.watch('use_proxy');
+    if (!useProxy) return { isValid: true, errors: [] };
 
     const routeId = domainForm.watch('route_id');
     const route = allRoutes.find(r => r.id === routeId);
@@ -361,7 +375,7 @@ const DeployerWizard = () => {
       isValid: errors.length === 0,
       errors,
     };
-  }, [domainForm.watch('use_caddy'), domainForm.watch('route_id'), allRoutes]);
+  }, [domainForm.watch('use_proxy'), domainForm.watch('route_id'), allRoutes]);
 
   // Navigation
   const handleNext = async () => {
@@ -407,7 +421,7 @@ const DeployerWizard = () => {
       start_command: config.start_command || undefined,
       healthcheck_type: config.healthcheck_type as HealthcheckType,
       healthcheck_value: config.healthcheck_value || '/',
-      expose_via_caddy: domain.use_caddy,
+      expose_via_caddy: domain.use_proxy && domain.proxy_type !== 'none',
       domain: selectedRoute?.full_domain || undefined,
       env_vars: getMergedEnvVars(),
     };
@@ -782,7 +796,7 @@ const DeployerWizard = () => {
               Domaine & Routage
             </CardTitle>
             <CardDescription>
-              Configurez l'accès HTTPS via Caddy
+              Configurez l'accès HTTPS via un reverse proxy
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -790,11 +804,11 @@ const DeployerWizard = () => {
               <form className="space-y-6">
                 <FormField
                   control={domainForm.control}
-                  name="use_caddy"
+                  name="use_proxy"
                   render={({ field }) => (
                     <FormItem className="flex items-center justify-between rounded-lg border p-4">
                       <div className="space-y-0.5">
-                        <FormLabel className="text-base">Exposer via Caddy</FormLabel>
+                        <FormLabel className="text-base">Exposer via reverse proxy</FormLabel>
                         <FormDescription>
                           Configurer automatiquement un reverse proxy avec HTTPS
                         </FormDescription>
@@ -806,8 +820,66 @@ const DeployerWizard = () => {
                   )}
                 />
 
-                {domainForm.watch('use_caddy') && (
+                {domainForm.watch('use_proxy') && (
                   <>
+                    {/* Proxy Type Selector */}
+                    <FormField
+                      control={domainForm.control}
+                      name="proxy_type"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Type de proxy</FormLabel>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                field.onChange('caddy');
+                                domainForm.setValue('route_id', '');
+                              }}
+                              className={`p-4 rounded-lg border text-left transition-all ${
+                                field.value === 'caddy'
+                                  ? 'border-primary bg-primary/10'
+                                  : 'border-border hover:border-primary/50'
+                              }`}
+                            >
+                              <div className="font-medium">Caddy</div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                HTTPS automatique, configuration simple
+                              </p>
+                              {availableCaddyRoutes.length > 0 && (
+                                <Badge variant="outline" className="mt-2 text-xs">
+                                  {availableCaddyRoutes.length} domaine(s)
+                                </Badge>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                field.onChange('nginx');
+                                domainForm.setValue('route_id', '');
+                              }}
+                              className={`p-4 rounded-lg border text-left transition-all ${
+                                field.value === 'nginx'
+                                  ? 'border-primary bg-primary/10'
+                                  : 'border-border hover:border-primary/50'
+                              }`}
+                            >
+                              <div className="font-medium">Nginx + Certbot</div>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Let's Encrypt, contrôle avancé
+                              </p>
+                              {availableNginxRoutes.length > 0 && (
+                                <Badge variant="outline" className="mt-2 text-xs">
+                                  {availableNginxRoutes.length} domaine(s)
+                                </Badge>
+                              )}
+                            </button>
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
                     <FormField
                       control={domainForm.control}
                       name="route_id"
@@ -817,7 +889,7 @@ const DeployerWizard = () => {
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Sélectionner un domaine Caddy" />
+                                <SelectValue placeholder={`Sélectionner un domaine ${proxyType === 'nginx' ? 'Nginx' : 'Caddy'}`} />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -862,6 +934,10 @@ const DeployerWizard = () => {
                           <Badge variant={selectedRoute.https_status === 'ok' ? 'default' : 'destructive'}>
                             {selectedRoute.https_status}
                           </Badge>
+                        </p>
+                        <p>
+                          <span className="text-muted-foreground">Proxy:</span>{' '}
+                          <Badge variant="secondary">{proxyType === 'nginx' ? 'Nginx' : 'Caddy'}</Badge>
                         </p>
                       </div>
                     )}

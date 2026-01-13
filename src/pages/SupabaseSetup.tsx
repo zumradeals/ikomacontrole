@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Database, Globe, CheckCircle2, XCircle, AlertTriangle, Loader2, Shield, Key, RefreshCw, Play } from 'lucide-react';
+import { Database, Globe, CheckCircle2, XCircle, AlertTriangle, Loader2, Shield, Key, RefreshCw, Play, Settings } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -11,14 +11,16 @@ import { InfraSelector } from '@/components/platform/InfraSelector';
 import { SupabaseCredentials } from '@/components/platform/SupabaseCredentials';
 import { usePlatformServices } from '@/hooks/usePlatformServices';
 import { useCaddyRoutes, useHttpsReadyRoutes, useCreateCaddyRoute, useUpdateCaddyRoute, CaddyRoute } from '@/hooks/useCaddyRoutes';
+import { useNginxRoutes, useHttpsReadyNginxRoutes, useUpdateNginxRoute, NginxRoute } from '@/hooks/useNginxRoutes';
 import { usePlatformInstances, useSupabaseInstance } from '@/hooks/usePlatformInstances';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
 import { toast } from '@/hooks/use-toast';
 
-type SetupStep = 'mode' | 'domain' | 'routing' | 'preflight' | 'install' | 'credentials';
+type SetupStep = 'mode' | 'proxy' | 'domain' | 'routing' | 'preflight' | 'install' | 'credentials' | 'post-install-proxy';
 
 type InstallMode = 'with-proxy' | 'without-proxy';
+type ProxyType = 'caddy' | 'nginx';
 
 interface PreflightCheck {
   id: string;
@@ -30,6 +32,7 @@ interface PreflightCheck {
 const SupabaseSetup = () => {
   const [selectedInfraId, setSelectedInfraId] = useState<string | undefined>();
   const [installMode, setInstallMode] = useState<InstallMode | null>(null);
+  const [proxyType, setProxyType] = useState<ProxyType>('caddy');
   const [currentStep, setCurrentStep] = useState<SetupStep>('mode');
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
   const [isVerifyingRoute, setIsVerifyingRoute] = useState(false);
@@ -49,12 +52,22 @@ const SupabaseSetup = () => {
     services,
   } = usePlatformServices(selectedInfraId);
 
-  const { data: allRoutes = [] } = useCaddyRoutes(selectedInfraId);
-  const { data: httpsReadyRoutes = [] } = useHttpsReadyRoutes(selectedInfraId);
+  // Caddy routes
+  const { data: allCaddyRoutes = [] } = useCaddyRoutes(selectedInfraId);
+  const { data: httpsReadyCaddyRoutes = [] } = useHttpsReadyRoutes(selectedInfraId);
+  const updateCaddyRoute = useUpdateCaddyRoute();
+  
+  // Nginx routes
+  const { data: allNginxRoutes = [] } = useNginxRoutes(selectedInfraId);
+  const { data: httpsReadyNginxRoutes = [] } = useHttpsReadyNginxRoutes(selectedInfraId);
+  const updateNginxRoute = useUpdateNginxRoute();
+
   const { data: supabaseInstance } = useSupabaseInstance(selectedInfraId);
   const createOrder = useCreateOrder();
-  const createRoute = useCreateCaddyRoute();
-  const updateRoute = useUpdateCaddyRoute();
+
+  // Select routes based on proxy type
+  const allRoutes = proxyType === 'nginx' ? allNginxRoutes : allCaddyRoutes;
+  const httpsReadyRoutes = proxyType === 'nginx' ? httpsReadyNginxRoutes : httpsReadyCaddyRoutes;
 
   const selectedRoute = useMemo(() => {
     return allRoutes.find(r => r.id === selectedRouteId);
@@ -75,12 +88,15 @@ const SupabaseSetup = () => {
   // Get the steps based on install mode
   const getSteps = (): SetupStep[] => {
     if (installMode === 'without-proxy') {
-      return ['mode', 'preflight', 'install', 'credentials'];
+      return ['mode', 'preflight', 'install', 'credentials', 'post-install-proxy'];
     }
-    return ['mode', 'domain', 'routing', 'preflight', 'install', 'credentials'];
+    return ['mode', 'proxy', 'domain', 'routing', 'preflight', 'install', 'credentials'];
   };
 
   const steps = getSteps();
+  
+  // Update route helper
+  const updateRoute = proxyType === 'nginx' ? updateNginxRoute : updateCaddyRoute;
 
   // Handle route verification via Caddy
   const handleVerifyRoute = async () => {
@@ -341,11 +357,13 @@ echo "✅ Supabase installé avec succès"
                   
                   const labels: Record<SetupStep, string> = {
                     mode: '1. Mode',
-                    domain: '2. Domaine',
-                    routing: '3. Routage',
-                    preflight: installMode === 'without-proxy' ? '2. Préflight' : '4. Préflight',
-                    install: installMode === 'without-proxy' ? '3. Installation' : '5. Installation',
-                    credentials: installMode === 'without-proxy' ? '4. Identifiants' : '6. Identifiants',
+                    proxy: '2. Proxy',
+                    domain: '3. Domaine',
+                    routing: '4. Routage',
+                    preflight: installMode === 'without-proxy' ? '2. Préflight' : '5. Préflight',
+                    install: installMode === 'without-proxy' ? '3. Installation' : '6. Installation',
+                    credentials: installMode === 'without-proxy' ? '4. Identifiants' : '7. Identifiants',
+                    'post-install-proxy': '5. Proxy',
                   };
                   
                   // Renumber based on actual position
@@ -464,9 +482,90 @@ echo "✅ Supabase installé avec succès"
 
                   <div className="flex justify-end">
                     <Button
-                      onClick={() => setCurrentStep(installMode === 'without-proxy' ? 'preflight' : 'domain')}
+                      onClick={() => setCurrentStep(installMode === 'without-proxy' ? 'preflight' : 'proxy')}
                       disabled={!canProceedFromMode}
                     >
+                      Suivant
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Step 1.5: Proxy Type Selection (only with proxy) */}
+            {currentStep === 'proxy' && installMode === 'with-proxy' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Settings className="w-5 h-5" />
+                    Choix du reverse proxy
+                  </CardTitle>
+                  <CardDescription>
+                    Sélectionnez le reverse proxy pour exposer Supabase en HTTPS
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {/* Caddy option */}
+                    <button
+                      onClick={() => {
+                        setProxyType('caddy');
+                        setSelectedRouteId(null);
+                      }}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        proxyType === 'caddy'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="space-y-2">
+                        <h4 className="font-semibold">Caddy</h4>
+                        <p className="text-sm text-muted-foreground">
+                          HTTPS automatique avec configuration simple.
+                          Idéal pour les déploiements rapides.
+                        </p>
+                        {httpsReadyCaddyRoutes.length > 0 && (
+                          <Badge variant="outline" className="text-green-500 border-green-500">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            {httpsReadyCaddyRoutes.length} domaine(s) disponible(s)
+                          </Badge>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Nginx option */}
+                    <button
+                      onClick={() => {
+                        setProxyType('nginx');
+                        setSelectedRouteId(null);
+                      }}
+                      className={`p-4 rounded-lg border-2 text-left transition-all ${
+                        proxyType === 'nginx'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <div className="space-y-2">
+                        <h4 className="font-semibold">Nginx + Certbot</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Let's Encrypt avec contrôle avancé.
+                          Plus de flexibilité de configuration.
+                        </p>
+                        {httpsReadyNginxRoutes.length > 0 && (
+                          <Badge variant="outline" className="text-green-500 border-green-500">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            {httpsReadyNginxRoutes.length} domaine(s) disponible(s)
+                          </Badge>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <Button variant="outline" onClick={() => setCurrentStep('mode')}>
+                      Retour
+                    </Button>
+                    <Button onClick={() => setCurrentStep('domain')}>
                       Suivant
                     </Button>
                   </div>
@@ -815,11 +914,61 @@ echo "✅ Supabase installé avec succès"
             )}
 
             {currentStep === 'credentials' && (
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                {installMode === 'without-proxy' && (
+                  <Button variant="outline" onClick={() => setCurrentStep('post-install-proxy')}>
+                    Configurer HTTPS maintenant
+                  </Button>
+                )}
                 <Button onClick={() => window.location.href = '/platform'}>
                   Retour à Platform
                 </Button>
               </div>
+            )}
+
+            {/* Post-Installation Proxy Configuration */}
+            {currentStep === 'post-install-proxy' && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Globe className="w-5 h-5" />
+                    Configurer le reverse proxy
+                  </CardTitle>
+                  <CardDescription>
+                    Sécurisez votre instance Supabase avec HTTPS
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <Alert>
+                    <Shield className="h-4 w-4" />
+                    <AlertTitle>Étape recommandée</AlertTitle>
+                    <AlertDescription>
+                      Configurez un reverse proxy (Caddy ou Nginx) pour exposer Supabase en HTTPS.
+                      Allez dans <strong>Platform → Domaines</strong> pour ajouter une route.
+                    </AlertDescription>
+                  </Alert>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Button variant="outline" onClick={() => window.location.href = '/platform'}>
+                      <Globe className="w-4 h-4 mr-2" />
+                      Configurer Caddy
+                    </Button>
+                    <Button variant="outline" onClick={() => window.location.href = '/platform'}>
+                      <Globe className="w-4 h-4 mr-2" />
+                      Configurer Nginx
+                    </Button>
+                  </div>
+
+                  <div className="flex justify-between">
+                    <Button variant="outline" onClick={() => setCurrentStep('credentials')}>
+                      Retour
+                    </Button>
+                    <Button onClick={() => window.location.href = '/platform'}>
+                      Terminer
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
         </div>
