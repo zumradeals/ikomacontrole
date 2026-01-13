@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layers, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Layers, RefreshCw, AlertTriangle, Scan, Terminal, Code } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,9 @@ import { InfraSelector } from '@/components/platform/InfraSelector';
 import { ServiceLogsDialog } from '@/components/platform/ServiceLogsDialog';
 import { CaddyDomainRegistry } from '@/components/platform/CaddyDomainRegistry';
 import { NginxDomainRegistry } from '@/components/platform/NginxDomainRegistry';
+import { PlaybookCatalog } from '@/components/infra/PlaybookCatalog';
+import { AutoDetectDialog } from '@/components/infra/AutoDetectDialog';
+import { CustomOrderDialog } from '@/components/infra/CustomOrderDialog';
 import { usePlatformServices, PREREQUISITE_PLAYBOOKS, PlatformService } from '@/hooks/usePlatformServices';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { getPlaybookById } from '@/lib/playbooks';
@@ -21,6 +24,9 @@ const Platform = () => {
   const [executingServiceId, setExecutingServiceId] = useState<string | null>(null);
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   const [selectedServiceForLogs, setSelectedServiceForLogs] = useState<PlatformService | null>(null);
+  const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
+  const [playbookDialogOpen, setPlaybookDialogOpen] = useState(false);
+  const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
 
   const {
     infrastructures,
@@ -286,6 +292,33 @@ const Platform = () => {
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={!gating.hasRunner || !gating.runnerOnline}
+                  onClick={() => setAutoDetectDialogOpen(true)}
+                >
+                  <Scan className="w-4 h-4 mr-2" />
+                  Auto-détection
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!gating.hasRunner || !gating.runnerOnline}
+                  onClick={() => setPlaybookDialogOpen(true)}
+                >
+                  <Terminal className="w-4 h-4 mr-2" />
+                  Playbooks
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!gating.hasRunner || !gating.runnerOnline}
+                  onClick={() => setCustomOrderDialogOpen(true)}
+                >
+                  <Code className="w-4 h-4 mr-2" />
+                  Custom
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={!gating.allMet || createOrder.isPending}
                   onClick={() => {
                     // Refresh all service statuses
@@ -396,6 +429,36 @@ const Platform = () => {
         serviceName={selectedServiceForLogs?.name || ''}
         orders={serviceOrders}
       />
+
+      {/* Auto-detect Dialog */}
+      {selectedInfraId && associatedRunner && (
+        <AutoDetectDialog
+          open={autoDetectDialogOpen}
+          onOpenChange={setAutoDetectDialogOpen}
+          infrastructureId={selectedInfraId}
+          runner={associatedRunner}
+        />
+      )}
+
+      {/* Playbook Catalog Dialog */}
+      {selectedInfraId && associatedRunner && (
+        <PlaybookCatalog
+          open={playbookDialogOpen}
+          onOpenChange={setPlaybookDialogOpen}
+          infrastructureId={selectedInfraId}
+          runner={associatedRunner}
+        />
+      )}
+
+      {/* Custom Order Dialog */}
+      {selectedInfraId && associatedRunner && (
+        <CustomOrderDialog
+          open={customOrderDialogOpen}
+          onOpenChange={setCustomOrderDialogOpen}
+          infrastructureId={selectedInfraId}
+          runner={associatedRunner}
+        />
+      )}
     </div>
   );
 };
