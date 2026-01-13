@@ -870,13 +870,43 @@ else
   exit 1
 fi
 
+# Function to wait for apt lock
+wait_for_apt_lock() {
+  local max_wait=120
+  local waited=0
+  while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+    if [ \$waited -eq 0 ]; then
+      echo -e "\${YELLOW}Waiting for apt lock to be released...\${NC}"
+    fi
+    sleep 5
+    waited=\$((waited + 5))
+    if [ \$waited -ge \$max_wait ]; then
+      echo -e "\${RED}Timeout waiting for apt lock after \${max_wait}s\${NC}"
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Install jq if not present
 if ! command -v jq &> /dev/null; then
   echo -e "\${YELLOW}Installing jq...\${NC}"
-  apt-get update -qq && apt-get install -y -qq jq 2>/dev/null || yum install -y -q jq 2>/dev/null || apk add -q jq 2>/dev/null || {
+  # Try apt with lock handling
+  if command -v apt-get &> /dev/null; then
+    wait_for_apt_lock && apt-get update -qq && apt-get install -y -qq jq
+  elif command -v yum &> /dev/null; then
+    yum install -y -q jq
+  elif command -v apk &> /dev/null; then
+    apk add -q jq
+  else
+    echo -e "\${RED}No supported package manager found.\${NC}"
+    exit 1
+  fi
+  
+  if ! command -v jq &> /dev/null; then
     echo -e "\${RED}Failed to install jq.\${NC}"
     exit 1
-  }
+  fi
 fi
 
 echo -e "\${YELLOW}Creating systemd service...\${NC}"
