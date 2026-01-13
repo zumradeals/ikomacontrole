@@ -4,18 +4,11 @@ import { SystemStatus } from '@/components/dashboard/SystemStatus';
 import { ModuleCard } from '@/components/dashboard/ModuleCard';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { QuickActions } from '@/components/dashboard/QuickActions';
+import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 
 const modules = [
   {
-    title: 'Runners',
-    description: 'Gérer les agents déployés sur vos serveurs VPS',
-    icon: Server,
-    path: '/runner',
-    status: 'inactive' as const,
-    count: 0,
-  },
-  {
-    title: 'Infrastructure',
+    title: 'Serveurs',
     description: 'Registre et configuration de vos serveurs',
     icon: HardDrive,
     path: '/infra',
@@ -23,14 +16,22 @@ const modules = [
     count: 0,
   },
   {
-    title: 'Platform',
-    description: 'Services plateforme : Supabase, Redis, Caddy',
+    title: 'Agents',
+    description: 'Agents déployés sur vos serveurs',
+    icon: Server,
+    path: '/runner',
+    status: 'inactive' as const,
+    count: 0,
+  },
+  {
+    title: 'Services',
+    description: 'Services plateforme : Docker, Redis, Supabase',
     icon: Layers,
     path: '/platform',
     status: 'inactive' as const,
   },
   {
-    title: 'Deployer',
+    title: 'Déploiements',
     description: 'Déploiement et orchestration de vos applications',
     icon: Rocket,
     path: '/deployer',
@@ -47,6 +48,9 @@ const Index = () => {
         description="Vue d'ensemble du Control Plane IKOMA"
         icon={LayoutDashboard}
       />
+
+      {/* Onboarding Banner */}
+      <OnboardingBanner />
 
       {/* System Status Metrics */}
       <SystemStatus />

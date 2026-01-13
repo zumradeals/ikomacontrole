@@ -60,6 +60,16 @@ export function useSettings() {
   };
 }
 
+// Hook to read a single setting value (read-only)
+export function useSetting(key: string) {
+  const { getSetting, isLoading } = useSettings();
+  
+  return {
+    value: getSetting(key),
+    isLoading,
+  };
+}
+
 // Hook for controlled input with local state
 export function useSettingInput(key: string) {
   const { getSetting, updateSetting, isLoading, isUpdating } = useSettings();
