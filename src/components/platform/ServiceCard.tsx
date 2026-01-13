@@ -32,8 +32,6 @@ interface ServiceCardProps {
   onVerify?: () => void;
   disabled?: boolean;
   isLoading?: boolean;
-  /** For Supabase: disable install if Caddy not verified */
-  caddyNotReady?: boolean;
 }
 
 const statusConfig: Record<ServiceStatus, { 
@@ -104,20 +102,23 @@ export function ServiceCard({
   onVerify,
   disabled = false,
   isLoading = false,
-  caddyNotReady = false,
 }: ServiceCardProps) {
   const Icon = service.icon;
   const config = statusConfig[service.status];
   const StatusIcon = config.icon;
 
-  const canInstall = service.status === 'ready_to_install' || service.status === 'failed';
+  const isProxyService = service.id === 'caddy' || service.id === 'nginx';
+  const canInstall =
+    service.status === 'ready_to_install' ||
+    service.status === 'failed' ||
+    (isProxyService && (service.status === 'unknown' || service.status === 'stale'));
   const canPrecheck = service.status === 'precheck_failed' || service.status === 'not_configured';
   const showInstalling = service.status === 'installing';
   const showChecking = service.status === 'checking';
   const needsVerification = service.status === 'unknown' || service.status === 'stale';
   const isCaddyService = service.id === 'caddy';
+  const isNginxService = service.id === 'nginx';
   const isSupabaseService = service.id === 'supabase';
-  
   // Format last verification time for Caddy
   const lastVerifiedLabel = service.lastVerifiedAt 
     ? formatDistanceToNow(service.lastVerifiedAt, { addSuffix: true, locale: fr })
@@ -137,15 +138,15 @@ export function ServiceCard({
             </TooltipTrigger>
             <TooltipContent side="left" className="max-w-xs">
               <p className="font-medium">{service.statusLabel}</p>
-              {isCaddyService && lastVerifiedLabel && (
+              {(isCaddyService || isNginxService) && lastVerifiedLabel && (
                 <p className="text-xs text-muted-foreground mt-1">
                   Dernière vérification: {lastVerifiedLabel}
                 </p>
               )}
-              {isCaddyService && service.staleReason && (
+              {(isCaddyService || isNginxService) && service.staleReason && (
                 <p className="text-xs text-amber-400 mt-1">{service.staleReason}</p>
               )}
-              {isCaddyService && service.runtimeVerification && (
+              {(isCaddyService || isNginxService) && service.runtimeVerification && (
                 <div className="text-xs mt-2 space-y-0.5">
                   <p>Version: {service.runtimeVerification.version}</p>
                   <p>HTTPS: {service.runtimeVerification.https_ready ? '✓ Prêt' : '✗ Non prêt'}</p>
@@ -167,7 +168,7 @@ export function ServiceCard({
               {service.statusLabel}
             </Badge>
           </TooltipTrigger>
-          {isCaddyService && (needsVerification || service.staleReason) && (
+          {(isCaddyService || isNginxService) && (needsVerification || service.staleReason) && (
             <TooltipContent>
               <p className="text-xs">
                 {service.staleReason || 'Aucune vérification runtime récente'}
@@ -184,19 +185,19 @@ export function ServiceCard({
           </div>
         )}
 
-        {/* Stale reason for Caddy */}
-        {isCaddyService && service.staleReason && service.status !== 'checking' && (
+        {/* Stale reason for Caddy/Nginx */}
+        {(isCaddyService || isNginxService) && service.staleReason && service.status !== 'checking' && (
           <div className="text-xs text-amber-400 mb-4 flex items-start gap-1.5">
             <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
             <span>{service.staleReason}</span>
           </div>
         )}
 
-        {/* Caddy not ready warning for Supabase */}
-        {isSupabaseService && caddyNotReady && (
-          <div className="text-xs text-amber-400 mb-4 flex items-start gap-1.5">
-            <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-            <span>Caddy doit être vérifié et HTTPS prêt</span>
+        {/* Supabase recommendation (not a blocker) */}
+        {isSupabaseService && (
+          <div className="text-xs text-muted-foreground mb-4 flex items-start gap-1.5">
+            <HelpCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+            <span>Recommandé: exposer via reverse proxy (HTTPS) pour la production.</span>
           </div>
         )}
 
@@ -209,8 +210,8 @@ export function ServiceCard({
 
         {/* Actions */}
         <div className="flex flex-wrap gap-2">
-          {/* Verify button for Caddy when status is unknown or stale */}
-          {isCaddyService && needsVerification && onVerify && (
+          {/* Verify button for Caddy/Nginx when status is unknown or stale */}
+          {(isCaddyService || isNginxService) && needsVerification && onVerify && (
             <Button
               size="sm"
               variant="default"
@@ -242,27 +243,16 @@ export function ServiceCard({
             </Button>
           )}
           
-          {/* Supabase install - disabled if Caddy not ready */}
+          {/* Supabase install - no longer blocked by proxy */}
           {canInstall && isSupabaseService && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Button
-                    size="sm"
-                    onClick={onInstall}
-                    disabled={disabled || isLoading || caddyNotReady}
-                  >
-                    <ExternalLink className="w-3 h-3 mr-1.5" />
-                    Configuration guidée
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              {caddyNotReady && (
-                <TooltipContent>
-                  <p className="text-xs">Caddy doit être installé et HTTPS prêt</p>
-                </TooltipContent>
-              )}
-            </Tooltip>
+            <Button
+              size="sm"
+              onClick={onInstall}
+              disabled={disabled || isLoading}
+            >
+              <ExternalLink className="w-3 h-3 mr-1.5" />
+              Configuration guidée
+            </Button>
           )}
           
           {/* Other services install */}
@@ -284,10 +274,10 @@ export function ServiceCard({
             </Button>
           )}
 
-          {service.status === 'installed' && (
+        {service.status === 'installed' && (
             <>
-              {/* Verify button for Caddy even when installed */}
-              {isCaddyService && onVerify && (
+              {/* Verify button for Caddy/Nginx even when installed */}
+              {(isCaddyService || isNginxService) && onVerify && (
                 <Button size="sm" variant="outline" onClick={onVerify} disabled={disabled || isLoading}>
                   <ShieldCheck className="w-3 h-3 mr-1.5" />
                   Vérifier
@@ -299,7 +289,7 @@ export function ServiceCard({
                   Routes
                 </Button>
               )}
-              {!isCaddyService && (
+              {!isCaddyService && !isNginxService && (
                 <Button size="sm" variant="outline" onClick={onRefresh} disabled={disabled}>
                   <RefreshCw className="w-3 h-3 mr-1.5" />
                   Status
