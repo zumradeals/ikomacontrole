@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layers, RefreshCw, AlertTriangle } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
@@ -121,12 +121,39 @@ const Platform = () => {
     setLogsDialogOpen(true);
   };
 
+  // Verify Caddy runtime status
+  const handleVerifyCaddy = useCallback(async () => {
+    const verifyPlaybook = getPlaybookById('proxy.caddy.verify');
+    if (!verifyPlaybook || !associatedRunner) return;
+    
+    setExecutingServiceId('caddy');
+    try {
+      await createOrder.mutateAsync({
+        runner_id: associatedRunner.id,
+        infrastructure_id: selectedInfraId,
+        category: 'detection',
+        name: 'Vérification Runtime Caddy',
+        description: `[${verifyPlaybook.id}] ${verifyPlaybook.description}`,
+        command: verifyPlaybook.command,
+      });
+      toast({
+        title: 'Vérification lancée',
+        description: 'L\'état de Caddy sera mis à jour sous peu.',
+      });
+    } finally {
+      setExecutingServiceId(null);
+    }
+  }, [associatedRunner, selectedInfraId, createOrder]);
+
   // Navigate to Supabase Setup page
   const handleSupabaseSetup = (service: PlatformService) => {
     if (service.id === 'supabase' && selectedInfraId) {
       navigate(`/platform/supabase?infraId=${selectedInfraId}`);
     }
   };
+
+  // Check if Caddy is ready for Supabase deployment
+  const caddyNotReady = !gating.caddyVerified || !gating.caddyHttpsReady;
 
   // Filter orders for selected service
   const serviceOrders = useMemo(() => {
@@ -209,9 +236,11 @@ const Platform = () => {
                   onInstall={service.id === 'supabase' ? () => handleSupabaseSetup(service) : () => handleInstall(service)}
                   onRefresh={() => handleRefresh(service)}
                   onViewLogs={() => handleViewLogs(service)}
+                  onVerify={service.id === 'caddy' ? handleVerifyCaddy : undefined}
                   onConfigure={undefined}
                   disabled={!gating.hasRunner || !gating.runnerOnline}
                   isLoading={executingServiceId === service.id}
+                  caddyNotReady={service.id === 'supabase' ? caddyNotReady : false}
                 />
               ))}
             </div>
@@ -256,9 +285,11 @@ const Platform = () => {
                       onInstall={service.id === 'supabase' ? () => handleSupabaseSetup(service) : () => handleInstall(service)}
                       onRefresh={() => handleRefresh(service)}
                       onViewLogs={() => handleViewLogs(service)}
+                      onVerify={service.id === 'caddy' ? handleVerifyCaddy : undefined}
                       onConfigure={undefined}
                       disabled={!gating.hasRunner || !gating.runnerOnline}
                       isLoading={executingServiceId === service.id}
+                      caddyNotReady={service.id === 'supabase' ? caddyNotReady : false}
                     />
                   </div>
                 ))}
