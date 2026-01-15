@@ -1,10 +1,10 @@
 /**
  * API Client for IKOMA Orders API
- * Uses edge function proxy to avoid CORS issues
- * Target: https://automate.ikomadigit.com/v1
+ * Direct frontend access - CORS configured on API side
+ * Base: https://automate.ikomadigit.com
+ * Root endpoints: /health, /ready
+ * Business routes: /v1/*
  */
-
-import { supabase } from '@/integrations/supabase/client';
 
 const API_BASE_URL = 'https://automate.ikomadigit.com';
 const API_PREFIX = '/v1';
@@ -24,56 +24,63 @@ export interface ApiResponse<T = unknown> {
 }
 
 /**
- * Get the edge function URL for the proxy
+ * Build the full URL for an API endpoint
+ * Root endpoints (/health, /ready) go directly to base
+ * Business endpoints go under /v1
  */
-function getProxyUrl(path: string): string {
-  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'lqocccsxzqnbcwshseom';
-  return `https://${projectId}.supabase.co/functions/v1/orders-proxy?path=${encodeURIComponent(path)}`;
+function buildUrl(endpoint: string, isRootEndpoint: boolean = false): string {
+  if (isRootEndpoint) {
+    return `${API_BASE_URL}${endpoint}`;
+  }
+  return `${API_BASE_URL}${API_PREFIX}${endpoint}`;
 }
 
 /**
- * Make an API request to the Orders API via edge function proxy
+ * Make an API request to the Orders API (direct call)
  */
 export async function apiRequest<T = unknown>(
   endpoint: string,
-  options: ApiClientOptions = {}
+  options: ApiClientOptions = {},
+  isRootEndpoint: boolean = false
 ): Promise<ApiResponse<T>> {
-  const { method = 'GET', body } = options;
+  const { method = 'GET', body, headers = {} } = options;
+  
+  const startTime = Date.now();
   
   try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-
-    const response = await fetch(getProxyUrl(endpoint), {
+    const response = await fetch(buildUrl(endpoint, isRootEndpoint), {
       method,
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...headers,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    const result = await response.json();
+    const latency = Date.now() - startTime;
+    const data = await response.json().catch(() => null);
 
-    if (!result.success) {
+    if (!response.ok) {
       return {
         success: false,
-        error: result.error || `HTTP ${result.status}`,
-        status: result.status || 0,
+        error: data?.message || data?.error || `HTTP ${response.status}`,
+        status: response.status,
+        latency,
       };
     }
 
     return {
       success: true,
-      data: result.data as T,
-      status: result.status,
-      latency: result.latency,
+      data: data as T,
+      status: response.status,
+      latency,
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Network error',
       status: 0,
+      latency: Date.now() - startTime,
     };
   }
 }
@@ -88,7 +95,7 @@ export async function checkApiHealth(): Promise<{
   message?: string;
 }> {
   try {
-    const result = await apiRequest<{ version?: string; status?: string }>('/health');
+    const result = await apiRequest<{ version?: string; status?: string }>('/health', {}, true);
     
     if (result.success && result.data) {
       return {
@@ -117,7 +124,7 @@ export async function checkApiHealth(): Promise<{
  */
 export async function checkApiReady(): Promise<boolean> {
   try {
-    const result = await apiRequest('/ready');
+    const result = await apiRequest('/ready', {}, true);
     return result.success;
   } catch {
     return false;
