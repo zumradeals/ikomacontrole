@@ -3,41 +3,15 @@ import { Copy, Check, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { buildInstallCommand, getInstallScriptUrl, ORDERS_API_BASE_URL } from '@/lib/api-client';
+import { useApiUrls } from '@/hooks/useApiUrls';
 
-interface InstallScriptProps {
-  baseUrl?: string; // Optional override, uses env var by default
-}
-
-export function InstallScript({ baseUrl }: InstallScriptProps) {
+export function InstallScript() {
   const [token, setToken] = useState('');
   const [copied, setCopied] = useState(false);
-
-  // Validate URL configuration
-  const urlValidation = useMemo(() => {
-    const effectiveBaseUrl = baseUrl || ORDERS_API_BASE_URL;
-    
-    // Check for misconfigured URL containing /v1/
-    if (effectiveBaseUrl.includes('/v1')) {
-      return {
-        isValid: false,
-        error: 'Installer URL misconfigured: l\'URL de base ne doit pas contenir /v1/',
-      };
-    }
-    
-    try {
-      getInstallScriptUrl();
-      return { isValid: true, error: null };
-    } catch (err) {
-      return {
-        isValid: false,
-        error: err instanceof Error ? err.message : 'URL configuration error',
-      };
-    }
-  }, [baseUrl]);
+  
+  const { baseUrl, installScriptUrl, validateInstallUrl, buildInstallCommand, isLoading } = useApiUrls();
 
   const generateToken = () => {
-    // Generate a random token
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
     const newToken = Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
@@ -46,13 +20,13 @@ export function InstallScript({ baseUrl }: InstallScriptProps) {
 
   // Build install command using centralized function
   const installScript = useMemo(() => {
-    if (!token || !urlValidation.isValid) return '';
+    if (!token || validateInstallUrl) return '';
     try {
       return buildInstallCommand(token);
     } catch {
       return '';
     }
-  }, [token, urlValidation.isValid]);
+  }, [token, validateInstallUrl, buildInstallCommand]);
 
   const handleCopy = async () => {
     if (installScript) {
@@ -63,24 +37,24 @@ export function InstallScript({ baseUrl }: InstallScriptProps) {
   };
 
   // Show error if URL is misconfigured
-  if (!urlValidation.isValid) {
+  if (validateInstallUrl) {
     return (
       <div className="flex items-center gap-2 p-4 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive">
         <AlertTriangle className="w-5 h-5 flex-shrink-0" />
         <div>
           <p className="text-sm font-medium">Configuration invalide</p>
-          <p className="text-xs opacity-80">{urlValidation.error}</p>
+          <p className="text-xs opacity-80">{validateInstallUrl}</p>
         </div>
       </div>
     );
   }
 
   // Show warning if no base URL configured
-  if (!ORDERS_API_BASE_URL) {
+  if (!baseUrl) {
     return (
       <div className="flex items-center gap-2 p-4 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400">
         <AlertCircle className="w-5 h-5 flex-shrink-0" />
-        <p className="text-sm">Configurez VITE_ORDERS_API_BASE_URL pour générer le script d'installation</p>
+        <p className="text-sm">Configurez l'URL de base de l'API dans Paramètres → Intégrations</p>
       </div>
     );
   }
@@ -96,8 +70,9 @@ export function InstallScript({ baseUrl }: InstallScriptProps) {
             onChange={(e) => setToken(e.target.value)}
             placeholder="Générez ou collez un token"
             className="font-mono text-sm"
+            disabled={isLoading}
           />
-          <Button variant="outline" onClick={generateToken}>
+          <Button variant="outline" onClick={generateToken} disabled={isLoading}>
             Générer
           </Button>
         </div>
