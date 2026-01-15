@@ -8,7 +8,6 @@ import { RunnersTable } from '@/components/runner/RunnersTable';
 import { InstallScript } from '@/components/runner/InstallScript';
 import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
-import { ORDERS_API_FULL_URL } from '@/lib/api-client';
 
 const Runner = () => {
   const { isExpert } = useAppMode();
@@ -63,7 +62,7 @@ const Runner = () => {
             </p>
             
             <div className="space-y-4">
-              <InstallScript baseUrl={ORDERS_API_FULL_URL} />
+              <InstallScript />
             </div>
 
             {!hasInfra && (
@@ -88,7 +87,7 @@ const Runner = () => {
             <h3 className="font-semibold text-sm sm:text-base">Script d'Installation</h3>
           </div>
           
-          <InstallScript baseUrl={ORDERS_API_FULL_URL} />
+          <InstallScript />
         </div>
       )}
 
