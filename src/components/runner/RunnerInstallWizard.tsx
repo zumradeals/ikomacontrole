@@ -2,11 +2,12 @@ import { useState, useMemo } from 'react';
 import { 
   Copy, Check, AlertCircle, AlertTriangle, ShieldAlert, Eye, EyeOff, 
   RefreshCw, CheckCircle, XCircle, Loader2, Server, Zap, Terminal, 
-  ChevronRight, ChevronDown
+  ChevronRight, ChevronDown, Plus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { 
   Select, 
   SelectContent, 
@@ -14,9 +15,19 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { useApiUrls } from '@/hooks/useApiUrls';
-import { useExternalRunners, useResetRunnerToken, useTestRunnerAuth, useTestClaimNext } from '@/hooks/useExternalRunners';
+import { useCreateRunner, useResetRunnerToken, useTestRunnerAuth, useTestClaimNext } from '@/hooks/useExternalRunners';
 import { useRunners } from '@/hooks/useRunners';
+import { useInfrastructures } from '@/hooks/useInfrastructures';
 import { cn } from '@/lib/utils';
 
 type Step = 1 | 2 | 3 | 4;
@@ -37,10 +48,17 @@ export function RunnerInstallWizard() {
   const [authSuccess, setAuthSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Set<Step>>(new Set([1]));
+  
+  // Create runner dialog state
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newRunnerName, setNewRunnerName] = useState('');
+  const [selectedInfraId, setSelectedInfraId] = useState<string>('');
 
   // Hooks
-  const { baseUrl, installScriptUrl, validateInstallUrl, isLoading: urlsLoading } = useApiUrls();
+  const { baseUrl, installScriptUrl, validateInstallUrl } = useApiUrls();
   const { data: runners, isLoading: runnersLoading, error: runnersError, refetch: refetchRunners } = useRunners();
+  const { data: infrastructures } = useInfrastructures();
+  const createRunner = useCreateRunner();
   const resetToken = useResetRunnerToken();
   const testAuth = useTestRunnerAuth();
   const testClaimNext = useTestClaimNext();
@@ -61,7 +79,7 @@ export function RunnerInstallWizard() {
   const steps: StepInfo[] = [
     {
       title: 'Choisir runner',
-      description: 'Sélectionnez un runner dans la liste',
+      description: 'Sélectionnez ou créez un runner',
       completed: !!selectedRunnerId,
       current: !selectedRunnerId,
     },
@@ -85,8 +103,6 @@ export function RunnerInstallWizard() {
     },
   ];
 
-  const currentStep = steps.findIndex(s => s.current) + 1 || 1;
-
   // Handlers
   const handleSelectRunner = (runnerId: string) => {
     setSelectedRunnerId(runnerId);
@@ -94,6 +110,35 @@ export function RunnerInstallWizard() {
     setAuthTested(false);
     setAuthSuccess(false);
     setExpandedSteps(new Set([1, 2]));
+  };
+
+  const handleCreateRunner = async () => {
+    if (!newRunnerName.trim()) return;
+    
+    try {
+      const result = await createRunner.mutateAsync({
+        name: newRunnerName.trim(),
+        infrastructureId: selectedInfraId || undefined,
+      });
+      
+      // Auto-select the new runner and set token
+      setSelectedRunnerId(result.id);
+      setToken(result.token);
+      setShowToken(true);
+      setAuthTested(false);
+      setAuthSuccess(false);
+      setExpandedSteps(new Set([1, 2, 3]));
+      
+      // Reset dialog state
+      setCreateDialogOpen(false);
+      setNewRunnerName('');
+      setSelectedInfraId('');
+      
+      // Refresh runners list
+      refetchRunners();
+    } catch {
+      // Error handled by mutation
+    }
   };
 
   const handleResetToken = async () => {
@@ -188,7 +233,7 @@ export function RunnerInstallWizard() {
         ))}
       </div>
 
-      {/* Step 1: Select Runner */}
+      {/* Step 1: Select or Create Runner */}
       <div className="border border-border/50 rounded-lg overflow-hidden">
         <button
           onClick={() => toggleStep(1)}
@@ -201,7 +246,7 @@ export function RunnerInstallWizard() {
               <Server className="w-5 h-5 text-primary" />
             )}
             <div>
-              <h3 className="font-medium">1. Choisir runner</h3>
+              <h3 className="font-medium">1. Choisir ou créer runner</h3>
               {selectedRunner && (
                 <p className="text-sm text-muted-foreground">
                   {selectedRunner.name} ({selectedRunner.status})
@@ -217,7 +262,7 @@ export function RunnerInstallWizard() {
             <div className="flex items-center gap-2">
               <Select value={selectedRunnerId} onValueChange={handleSelectRunner}>
                 <SelectTrigger className="flex-1">
-                  <SelectValue placeholder={runnersLoading ? "Chargement..." : "Sélectionner un runner"} />
+                  <SelectValue placeholder={runnersLoading ? "Chargement..." : "Sélectionner un runner existant"} />
                 </SelectTrigger>
                 <SelectContent>
                   {runners?.map((runner) => (
@@ -237,6 +282,82 @@ export function RunnerInstallWizard() {
                 <RefreshCw className={cn("w-4 h-4", runnersLoading && "animate-spin")} />
               </Button>
             </div>
+
+            {/* Create Runner Dialog */}
+            <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="w-full">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Créer un nouveau runner
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Créer un runner</DialogTitle>
+                  <DialogDescription>
+                    Créez un nouveau runner et obtenez automatiquement son token d'authentification.
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="runner-name">Nom du runner</Label>
+                    <Input
+                      id="runner-name"
+                      value={newRunnerName}
+                      onChange={(e) => setNewRunnerName(e.target.value)}
+                      placeholder="ex: prod-server-1"
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Nom unique pour identifier ce runner
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="infra-select">Infrastructure (optionnel)</Label>
+                    <Select value={selectedInfraId} onValueChange={setSelectedInfraId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Aucune infrastructure" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Aucune</SelectItem>
+                        {infrastructures?.map((infra) => (
+                          <SelectItem key={infra.id} value={infra.id}>
+                            {infra.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Associer le runner à une infrastructure existante
+                    </p>
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                    Annuler
+                  </Button>
+                  <Button 
+                    onClick={handleCreateRunner}
+                    disabled={!newRunnerName.trim() || createRunner.isPending}
+                  >
+                    {createRunner.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Création...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Créer et générer token
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             
             {runnersError && (
               <div className="flex items-center gap-2 text-destructive text-sm">
@@ -282,28 +403,25 @@ export function RunnerInstallWizard() {
         
         {expandedSteps.has(2) && selectedRunnerId && (
           <div className="p-4 pt-0 space-y-3">
-            <Button 
-              onClick={handleResetToken}
-              disabled={resetToken.isPending}
-              className="w-full"
-            >
-              {resetToken.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Génération...
-                </>
-              ) : token ? (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Régénérer token
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4 mr-2" />
-                  Générer token
-                </>
-              )}
-            </Button>
+            {!token && (
+              <Button 
+                onClick={handleResetToken}
+                disabled={resetToken.isPending}
+                className="w-full"
+              >
+                {resetToken.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Génération...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 mr-2" />
+                    Générer / Reset token
+                  </>
+                )}
+              </Button>
+            )}
 
             {resetToken.isError && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive">
@@ -355,6 +473,26 @@ export function RunnerInstallWizard() {
                     </Button>
                   </div>
                 </div>
+
+                <Button 
+                  onClick={handleResetToken}
+                  disabled={resetToken.isPending}
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                >
+                  {resetToken.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Régénération...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Régénérer token
+                    </>
+                  )}
+                </Button>
               </>
             )}
           </div>

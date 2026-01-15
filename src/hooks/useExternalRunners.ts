@@ -26,13 +26,9 @@ export function useExternalRunners() {
   return useQuery({
     queryKey: ['external-runners', v1Url],
     queryFn: async (): Promise<ExternalRunner[]> => {
-      // Get the admin key from environment (edge function will have it)
-      // For frontend, we need to call via our edge function or have it configured
       const adminKey = import.meta.env.VITE_IKOMA_ADMIN_KEY;
       
       if (!adminKey) {
-        // If no admin key in env, the API call will fail
-        // We'll handle this gracefully
         console.warn('VITE_IKOMA_ADMIN_KEY not configured');
       }
 
@@ -53,8 +49,68 @@ export function useExternalRunners() {
       return data.runners || data || [];
     },
     enabled: !urlsLoading && !!v1Url,
-    refetchInterval: 15000, // Refetch every 15 seconds
+    refetchInterval: 15000,
     staleTime: 10000,
+  });
+}
+
+interface CreateRunnerResult {
+  id: string;
+  name: string;
+  token: string; // Clear token returned only on creation
+}
+
+/**
+ * Create a new runner via backend API
+ * Uses POST /v1/runners with x-ikoma-admin-key header
+ * Returns the runner ID and initial clear token
+ */
+export function useCreateRunner() {
+  const { v1Url } = useApiUrls();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ name, infrastructureId }: { name: string; infrastructureId?: string }): Promise<CreateRunnerResult> => {
+      const adminKey = import.meta.env.VITE_IKOMA_ADMIN_KEY;
+      
+      if (!adminKey) {
+        throw new Error('Clé admin non configurée (VITE_IKOMA_ADMIN_KEY)');
+      }
+
+      const response = await fetch(`${v1Url}/runners`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ikoma-admin-key': adminKey,
+        },
+        body: JSON.stringify({
+          name,
+          infrastructure_id: infrastructureId || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['external-runners'] });
+      queryClient.invalidateQueries({ queryKey: ['runners'] });
+      toast({
+        title: 'Runner créé',
+        description: `${data.name} créé avec succès. Token généré !`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Erreur création',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
   });
 }
 
