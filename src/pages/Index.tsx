@@ -1,10 +1,11 @@
-import { LayoutDashboard, Server, HardDrive, Layers, Rocket } from 'lucide-react';
+import { LayoutDashboard, Server, HardDrive, Terminal, Rocket } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SystemStatus } from '@/components/dashboard/SystemStatus';
 import { ModuleCard } from '@/components/dashboard/ModuleCard';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { QuickActions } from '@/components/dashboard/QuickActions';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
+import { ApiStatusWidget } from '@/components/dashboard/ApiStatusWidget';
 
 const modules = [
   {
@@ -24,10 +25,10 @@ const modules = [
     count: 0,
   },
   {
-    title: 'Services',
-    description: 'Services plateforme : Docker, Redis, Supabase',
-    icon: Layers,
-    path: '/platform',
+    title: 'Playbooks',
+    description: 'Catalogue de scripts d\'automatisation',
+    icon: Terminal,
+    path: '/playbooks',
     status: 'inactive' as const,
   },
   {
@@ -68,6 +69,9 @@ const Index = () => {
 
         {/* Sidebar */}
         <div className="space-y-6">
+          {/* API Status Widget */}
+          <ApiStatusWidget />
+          
           <QuickActions />
           <ActivityFeed />
         </div>
