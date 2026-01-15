@@ -1,8 +1,10 @@
 /**
  * API Client for IKOMA Orders API
- * Base URL: https://automate.ikomadigit.com
- * Prefix: /v1
+ * Uses edge function proxy to avoid CORS issues
+ * Target: https://automate.ikomadigit.com/v1
  */
+
+import { supabase } from '@/integrations/supabase/client';
 
 const API_BASE_URL = 'https://automate.ikomadigit.com';
 const API_PREFIX = '/v1';
@@ -18,59 +20,54 @@ export interface ApiResponse<T = unknown> {
   data?: T;
   error?: string;
   status: number;
+  latency?: number;
 }
 
 /**
- * Get the admin API key from environment
+ * Get the edge function URL for the proxy
  */
-function getAdminKey(): string {
-  // In edge functions, use Deno.env
-  // In frontend, we'll need to proxy through edge function
-  return '';
+function getProxyUrl(path: string): string {
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'lqocccsxzqnbcwshseom';
+  return `https://${projectId}.supabase.co/functions/v1/orders-proxy?path=${encodeURIComponent(path)}`;
 }
 
 /**
- * Make an API request to the Orders API
- * Note: /health and /ready are at root level, other routes use /v1 prefix
+ * Make an API request to the Orders API via edge function proxy
  */
 export async function apiRequest<T = unknown>(
   endpoint: string,
   options: ApiClientOptions = {}
 ): Promise<ApiResponse<T>> {
-  const { method = 'GET', body, headers = {} } = options;
+  const { method = 'GET', body } = options;
   
-  // /health and /ready are at root, others use /v1 prefix
-  const isRootEndpoint = endpoint === '/health' || endpoint === '/ready';
-  const url = isRootEndpoint 
-    ? `${API_BASE_URL}${endpoint}`
-    : `${API_BASE_URL}${API_PREFIX}${endpoint}`;
-
-  const requestHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...headers,
-  };
-
   try {
-    const response = await fetch(url, {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+
+    const response = await fetch(getProxyUrl(endpoint), {
       method,
-      headers: requestHeaders,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    const data = await response.json().catch(() => null);
+    const result = await response.json();
 
-    if (!response.ok) {
+    if (!result.success) {
       return {
         success: false,
-        error: data?.error || data?.message || `HTTP ${response.status}`,
-        status: response.status,
+        error: result.error || `HTTP ${result.status}`,
+        status: result.status || 0,
       };
     }
 
     return {
       success: true,
-      data: data as T,
-      status: response.status,
+      data: result.data as T,
+      status: result.status,
+      latency: result.latency,
     };
   } catch (error) {
     return {
@@ -90,34 +87,26 @@ export async function checkApiHealth(): Promise<{
   version?: string;
   message?: string;
 }> {
-  const startTime = Date.now();
-  
   try {
-    const response = await fetch(`${API_BASE_URL}/health`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const result = await apiRequest<{ version?: string; status?: string }>('/health');
     
-    const latency = Date.now() - startTime;
-    
-    if (response.ok) {
-      const data = await response.json();
+    if (result.success && result.data) {
       return {
         status: 'online',
-        latency,
-        version: data.version,
+        latency: result.latency || 0,
+        version: result.data.version,
       };
     }
     
     return {
       status: 'error',
-      latency,
-      message: `HTTP ${response.status}`,
+      latency: result.latency || 0,
+      message: result.error || `HTTP ${result.status}`,
     };
   } catch (error) {
     return {
       status: 'offline',
-      latency: Date.now() - startTime,
+      latency: 0,
       message: error instanceof Error ? error.message : 'Connection failed',
     };
   }
@@ -128,8 +117,8 @@ export async function checkApiHealth(): Promise<{
  */
 export async function checkApiReady(): Promise<boolean> {
   try {
-    const response = await fetch(`${API_BASE_URL}/ready`);
-    return response.ok;
+    const result = await apiRequest('/ready');
+    return result.success;
   } catch {
     return false;
   }
