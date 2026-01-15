@@ -25,8 +25,8 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { useApiUrls } from '@/hooks/useApiUrls';
-import { useCreateRunner, useResetRunnerToken, useTestRunnerAuth, useTestClaimNext } from '@/hooks/useExternalRunners';
-import { useRunners } from '@/hooks/useRunners';
+import { useProxyRunners, useProxyCreateRunner, useProxyResetToken } from '@/hooks/useProxyRunners';
+import { useTestRunnerAuth, useTestClaimNext } from '@/hooks/useRunnerAuthTest';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 import { cn } from '@/lib/utils';
 
@@ -54,12 +54,12 @@ export function RunnerInstallWizard() {
   const [newRunnerName, setNewRunnerName] = useState('');
   const [selectedInfraId, setSelectedInfraId] = useState<string>('');
 
-  // Hooks
+  // Hooks - Using secure proxy (no admin key in frontend)
   const { baseUrl, installScriptUrl, validateInstallUrl } = useApiUrls();
-  const { data: runners, isLoading: runnersLoading, error: runnersError, refetch: refetchRunners } = useRunners();
+  const { data: runners, isLoading: runnersLoading, error: runnersError, refetch: refetchRunners } = useProxyRunners();
   const { data: infrastructures } = useInfrastructures();
-  const createRunner = useCreateRunner();
-  const resetToken = useResetRunnerToken();
+  const createRunner = useProxyCreateRunner();
+  const resetToken = useProxyResetToken();
   const testAuth = useTestRunnerAuth();
   const testClaimNext = useTestClaimNext();
 
@@ -192,6 +192,22 @@ export function RunnerInstallWizard() {
     });
   };
 
+  // Calculate runner status badge variant
+  const getStatusBadge = (status: string) => {
+    const isOnline = status?.toLowerCase() === 'online';
+    return (
+      <Badge 
+        variant="outline" 
+        className={cn(
+          "ml-2 text-xs",
+          isOnline ? "border-green-500/50 text-green-500 bg-green-500/10" : "border-muted-foreground/50"
+        )}
+      >
+        {isOnline ? '🟢' : '⚪'} {status}
+      </Badge>
+    );
+  };
+
   // URL validation error
   if (validateInstallUrl) {
     return (
@@ -207,6 +223,14 @@ export function RunnerInstallWizard() {
 
   return (
     <div className="space-y-4">
+      {/* Security notice */}
+      <div className="flex items-start gap-2 p-3 rounded-lg bg-primary/5 border border-primary/20 text-primary">
+        <ShieldAlert className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <p className="text-xs">
+          Les tokens sont générés côté serveur et jamais exposés dans le navigateur.
+        </p>
+      </div>
+
       {/* Stepper header */}
       <div className="flex items-center gap-2 flex-wrap">
         {steps.map((step, idx) => (
@@ -270,15 +294,13 @@ export function RunnerInstallWizard() {
                       <div className="flex items-center gap-2">
                         <Server className="w-4 h-4" />
                         <span>{runner.name}</span>
-                        <Badge variant="outline" className="ml-2 text-xs">
-                          {runner.status}
-                        </Badge>
+                        {getStatusBadge(runner.status)}
                       </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Button variant="ghost" size="icon" onClick={() => refetchRunners()}>
+              <Button variant="ghost" size="icon" onClick={() => refetchRunners()} title="Actualiser la liste">
                 <RefreshCw className={cn("w-4 h-4", runnersLoading && "animate-spin")} />
               </Button>
             </div>
@@ -369,7 +391,7 @@ export function RunnerInstallWizard() {
             {selectedRunnerId && (
               <div className="p-3 rounded-lg bg-muted/30 text-xs font-mono">
                 <span className="text-muted-foreground">Runner ID:</span>{' '}
-                <span className="text-foreground">{selectedRunnerId}</span>
+                <span className="text-foreground select-all">{selectedRunnerId}</span>
               </div>
             )}
           </div>
@@ -457,6 +479,7 @@ export function RunnerInstallWizard() {
                       variant="ghost"
                       size="icon"
                       onClick={() => setShowToken(!showToken)}
+                      title={showToken ? "Masquer" : "Afficher"}
                     >
                       {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </Button>
@@ -468,6 +491,7 @@ export function RunnerInstallWizard() {
                         setCopied(true);
                         setTimeout(() => setCopied(false), 1000);
                       }}
+                      title="Copier le token"
                     >
                       {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                     </Button>
@@ -557,6 +581,7 @@ export function RunnerInstallWizard() {
                 onClick={handleTestClaimNext}
                 disabled={testClaimNext.isPending || !authSuccess}
                 variant="outline"
+                title="Tester claim-next"
               >
                 {testClaimNext.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

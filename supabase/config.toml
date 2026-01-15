@@ -2,3 +2,6 @@ project_id = "lqocccsxzqnbcwshseom"
 
 [functions.runner-api]
 verify_jwt = false
+
+[functions.admin-proxy]
+verify_jwt = false
