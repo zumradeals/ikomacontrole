@@ -1,14 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useSettings } from './useSettings';
-
-// Hook to get a single setting value
-function useSetting(key: string) {
-  const { getSetting, isLoading } = useSettings();
-  return {
-    data: isLoading ? undefined : getSetting(key) || undefined,
-    isLoading,
-  };
-}
+import { ORDERS_API_FULL_URL, checkApiHealth } from '@/lib/api-client';
 
 interface DashboardStats {
   runners: {
@@ -27,16 +18,10 @@ interface DashboardStats {
 }
 
 export function useDashboardStats() {
-  const { data: runnerBaseUrl } = useSetting('runner_base_url');
-
   return useQuery({
-    queryKey: ['dashboard-stats', runnerBaseUrl],
+    queryKey: ['dashboard-stats'],
     queryFn: async (): Promise<DashboardStats> => {
-      if (!runnerBaseUrl) {
-        throw new Error('Runner API URL not configured');
-      }
-      
-      const response = await fetch(`${runnerBaseUrl}/stats`);
+      const response = await fetch(`${ORDERS_API_FULL_URL}/stats`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch stats: ${response.status}`);
@@ -50,48 +35,25 @@ export function useDashboardStats() {
       
       return data.stats;
     },
-    enabled: !!runnerBaseUrl,
     refetchInterval: 10000, // Refetch every 10 seconds
     staleTime: 5000,
   });
 }
 
-export function useApiHealthCheck(baseUrl: string | undefined) {
+export function useApiHealthCheck() {
   return useQuery({
-    queryKey: ['api-health', baseUrl],
+    queryKey: ['api-health'],
     queryFn: async () => {
-      if (!baseUrl) throw new Error('No URL');
-      
-      const startTime = Date.now();
-      const response = await fetch(`${baseUrl}/health`);
-      const latency = Date.now() - startTime;
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      return {
-        status: 'online' as const,
-        latency,
-        version: data.version,
-        heartbeatInterval: data.heartbeat_interval,
-        pollInterval: data.poll_interval,
-        offlineThreshold: data.offline_threshold,
-      };
+      return await checkApiHealth();
     },
-    enabled: !!baseUrl,
     refetchInterval: 30000,
     retry: 1,
   });
 }
 
 export function useTestOrder(runnerId: string) {
-  const { data: runnerBaseUrl } = useSetting('runner_base_url');
-  
   return {
-    baseUrl: runnerBaseUrl,
-    canTest: !!runnerBaseUrl && !!runnerId,
+    baseUrl: ORDERS_API_FULL_URL,
+    canTest: !!runnerId,
   };
 }

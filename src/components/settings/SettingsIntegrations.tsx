@@ -1,87 +1,60 @@
-import { Link2, Save, Key, GitBranch, Webhook, RefreshCw, Eye, EyeOff, Copy } from 'lucide-react';
+import { Link2, Key, GitBranch, Webhook, RefreshCw, Eye, EyeOff, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useSettingInput } from '@/hooks/useSettings';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
+import { ORDERS_API_BASE_URL, ORDERS_API_FULL_URL } from '@/lib/api-client';
 import { toast } from 'sonner';
 import { useState } from 'react';
 
 export function SettingsIntegrations() {
-  const { 
-    value: runnerBaseUrl, 
-    onChange: setRunnerBaseUrl, 
-    onSave: saveRunnerBaseUrl,
-    isUpdating,
-    isDirty 
-  } = useSettingInput('runner_base_url');
-
   const [showToken, setShowToken] = useState(false);
 
-  const handleSave = async () => {
-    try {
-      await saveRunnerBaseUrl();
-      toast.success('Configuration sauvegardée');
-    } catch (error) {
-      toast.error('Erreur lors de la sauvegarde');
-    }
-  };
-
   const handleCopyUrl = () => {
-    navigator.clipboard.writeText(runnerBaseUrl);
+    navigator.clipboard.writeText(ORDERS_API_FULL_URL);
     toast.success('URL copiée');
   };
 
   return (
     <div className="space-y-6">
-      {/* Runner API */}
+      {/* Orders API */}
       <div className="glass-panel rounded-xl p-6 space-y-6">
         <div>
           <h3 className="font-semibold flex items-center gap-2">
             <Link2 className="w-4 h-4 text-primary" />
-            API des Agents (Runner)
+            API Orders (IKOMA)
           </h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Configuration de la connexion entre les agents et le Control Plane
+            Connexion à l'API externe de gestion des ordres
           </p>
         </div>
         
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="runner_base_url">URL de base de l'API</Label>
+            <Label>URL de base de l'API</Label>
             <div className="flex gap-2">
               <Input
-                id="runner_base_url"
-                placeholder="https://example.supabase.co/functions/v1/runner-api"
-                value={runnerBaseUrl}
-                onChange={(e) => setRunnerBaseUrl(e.target.value)}
+                value={ORDERS_API_BASE_URL}
+                readOnly
+                className="font-mono text-sm bg-muted/50"
               />
               <Button 
                 variant="ghost" 
                 size="icon"
                 onClick={handleCopyUrl}
-                disabled={!runnerBaseUrl}
               >
                 <Copy className="w-4 h-4" />
               </Button>
-              <Button 
-                onClick={handleSave} 
-                disabled={!isDirty || isUpdating}
-                variant={isDirty ? "default" : "outline"}
-              >
-                <Save className="w-4 h-4 mr-2" />
-                {isUpdating ? 'Sauvegarde...' : 'Sauvegarder'}
-              </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              URL publique où les agents peuvent contacter l'API du Control Plane
+              API endpoints: <code className="text-primary">/v1/*</code> • Health: <code className="text-primary">/health</code>
             </p>
           </div>
 
           {/* API Health */}
           <div className="pt-4 border-t border-border/50">
             <h4 className="text-sm font-medium mb-3">État de la connexion</h4>
-            <ApiHealthCheck baseUrl={runnerBaseUrl} />
+            <ApiHealthCheck />
           </div>
         </div>
       </div>

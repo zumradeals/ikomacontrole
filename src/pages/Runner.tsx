@@ -2,34 +2,21 @@ import { Server, RefreshCw, Terminal, ExternalLink, HardDrive } from 'lucide-rea
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
-import { useSetting } from '@/hooks/useSettings';
 import { useAppMode } from '@/contexts/AppModeContext';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { RunnersTable } from '@/components/runner/RunnersTable';
 import { InstallScript } from '@/components/runner/InstallScript';
 import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
-import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from 'sonner';
+import { ORDERS_API_FULL_URL } from '@/lib/api-client';
 
 const Runner = () => {
-  const { value: runnerBaseUrl, isLoading: settingsLoading } = useSetting('runner_base_url');
   const { isExpert } = useAppMode();
   const { data: runners, refetch: refetchRunners, isLoading: runnersLoading } = useRunners();
   const { data: infrastructures } = useInfrastructures();
 
   const hasRunners = (runners?.length ?? 0) > 0;
   const hasInfra = (infrastructures?.length ?? 0) > 0;
-
-  if (settingsLoading) {
-    return (
-      <div className="space-y-6 animate-fade-in">
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-48 w-full" />
-        <Skeleton className="h-64 w-full" />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
@@ -57,15 +44,7 @@ const Runner = () => {
           </Link>
         </div>
         
-        <ApiHealthCheck baseUrl={runnerBaseUrl} />
-        
-        {runnerBaseUrl && (
-          <div className="mt-3 pt-3 border-t border-border/50">
-            <p className="text-xs text-muted-foreground truncate">
-              <span className="font-medium">URL :</span> {runnerBaseUrl}
-            </p>
-          </div>
-        )}
+        <ApiHealthCheck />
       </div>
 
       {/* Empty state with CTA */}
@@ -83,23 +62,9 @@ const Runner = () => {
               )}
             </p>
             
-            {runnerBaseUrl ? (
-              <div className="space-y-4">
-                <InstallScript baseUrl={runnerBaseUrl} />
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-amber-400 text-sm">
-                  ⚠️ L'URL de l'API n'est pas configurée
-                </p>
-                <Link to="/settings">
-                  <Button variant="outline">
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Configurer dans Paramètres
-                  </Button>
-                </Link>
-              </div>
-            )}
+            <div className="space-y-4">
+              <InstallScript baseUrl={ORDERS_API_FULL_URL} />
+            </div>
 
             {!hasInfra && (
               <div className="mt-6 pt-6 border-t border-border/50">
@@ -115,15 +80,15 @@ const Runner = () => {
         </div>
       )}
 
-      {/* Installation Script - Expert mode (only show if there are runners or in expert) */}
-      {isExpert && runnerBaseUrl && (
+      {/* Installation Script - Expert mode */}
+      {isExpert && (
         <div className="glass-panel rounded-xl p-4 sm:p-5">
           <div className="flex items-center gap-2 mb-3 sm:mb-4">
             <Terminal className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
             <h3 className="font-semibold text-sm sm:text-base">Script d'Installation</h3>
           </div>
           
-          <InstallScript baseUrl={runnerBaseUrl} />
+          <InstallScript baseUrl={ORDERS_API_FULL_URL} />
         </div>
       )}
 

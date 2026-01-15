@@ -1,10 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-interface ApiHealthCheckProps {
-  baseUrl: string;
-}
+import { checkApiHealth, ORDERS_API_BASE_URL } from '@/lib/api-client';
 
 type HealthStatus = 'checking' | 'online' | 'offline' | 'error';
 
@@ -15,69 +12,42 @@ interface HealthResult {
   version?: string;
 }
 
-export function ApiHealthCheck({ baseUrl }: ApiHealthCheckProps) {
+export function ApiHealthCheck() {
   const [health, setHealth] = useState<HealthResult>({ 
     status: 'checking', 
     message: 'Vérification en cours...' 
   });
 
-  const checkHealth = async () => {
-    if (!baseUrl) {
-      setHealth({ status: 'error', message: 'URL non configurée' });
-      return;
-    }
-
+  const performHealthCheck = async () => {
     setHealth({ status: 'checking', message: 'Vérification en cours...' });
     
-    const startTime = Date.now();
+    const result = await checkApiHealth();
     
-    try {
-      // Build health URL - handle trailing slash and existing /health
-      let healthUrl = baseUrl.trim();
-      // Remove trailing slash if present
-      if (healthUrl.endsWith('/')) {
-        healthUrl = healthUrl.slice(0, -1);
-      }
-      // Don't add /health if already present
-      if (!healthUrl.endsWith('/health')) {
-        healthUrl = `${healthUrl}/health`;
-      }
-      
-      const response = await fetch(healthUrl, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+    if (result.status === 'online') {
+      setHealth({ 
+        status: 'online', 
+        message: 'API joignable',
+        latency: result.latency,
+        version: result.version
       });
-      
-      const latency = Date.now() - startTime;
-      
-      if (response.ok) {
-        const data = await response.json();
-        setHealth({ 
-          status: 'online', 
-          message: `API joignable`,
-          latency,
-          version: data.version
-        });
-      } else {
-        setHealth({ 
-          status: 'error', 
-          message: `Erreur HTTP ${response.status}`,
-          latency 
-        });
-      }
-    } catch (error) {
-      const latency = Date.now() - startTime;
+    } else if (result.status === 'offline') {
       setHealth({ 
         status: 'offline', 
-        message: error instanceof Error ? error.message : 'Connexion impossible',
-        latency
+        message: result.message || 'Connexion impossible',
+        latency: result.latency
+      });
+    } else {
+      setHealth({ 
+        status: 'error', 
+        message: result.message || 'Erreur',
+        latency: result.latency
       });
     }
   };
 
   useEffect(() => {
-    checkHealth();
-  }, [baseUrl]);
+    performHealthCheck();
+  }, []);
 
   const statusColors = {
     checking: 'text-muted-foreground',
@@ -103,18 +73,19 @@ export function ApiHealthCheck({ baseUrl }: ApiHealthCheckProps) {
           <p className={`text-sm font-medium ${statusColors[health.status]}`}>
             {health.message}
           </p>
-          {health.latency !== undefined && health.status !== 'checking' && (
-            <p className="text-xs text-muted-foreground">
-              Latence: {health.latency}ms
-              {health.version && ` • Version: ${health.version}`}
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            {ORDERS_API_BASE_URL}
+            {health.latency !== undefined && health.status !== 'checking' && (
+              <> • Latence: {health.latency}ms</>
+            )}
+            {health.version && ` • v${health.version}`}
+          </p>
         </div>
       </div>
       <Button 
         variant="ghost" 
         size="sm" 
-        onClick={checkHealth}
+        onClick={performHealthCheck}
         disabled={health.status === 'checking'}
       >
         <RefreshCw className={`w-4 h-4 ${health.status === 'checking' ? 'animate-spin' : ''}`} />
