@@ -5,13 +5,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useApiUrls } from '@/hooks/useApiUrls';
 
-export function InstallScript() {
+interface InstallScriptProps {
+  runnerId?: string;
+}
+
+export function InstallScript({ runnerId: propRunnerId }: InstallScriptProps) {
   const [token, setToken] = useState('');
+  const [runnerId, setRunnerId] = useState(propRunnerId || '');
   const [tokenGenerated, setTokenGenerated] = useState(false);
   const [showToken, setShowToken] = useState(true);
   const [copied, setCopied] = useState(false);
   
-  const { baseUrl, installScriptUrl, validateInstallUrl, buildInstallCommand, isLoading } = useApiUrls();
+  const { baseUrl, installScriptUrl, validateInstallUrl, isLoading } = useApiUrls();
 
   const generateToken = () => {
     const array = new Uint8Array(32);
@@ -22,15 +27,11 @@ export function InstallScript() {
     setShowToken(true); // Show token on generation
   };
 
-  // Build install command using centralized function
+  // Build install command with runner-id
   const installScript = useMemo(() => {
-    if (!token || validateInstallUrl) return '';
-    try {
-      return buildInstallCommand(token);
-    } catch {
-      return '';
-    }
-  }, [token, validateInstallUrl, buildInstallCommand]);
+    if (!token || !runnerId || validateInstallUrl) return '';
+    return `curl -sSL ${installScriptUrl} | bash -s -- --api-url ${baseUrl} --runner-id ${runnerId} --token ${token}`;
+  }, [token, runnerId, validateInstallUrl, installScriptUrl, baseUrl]);
 
   const handleCopy = async () => {
     if (installScript) {
@@ -80,6 +81,23 @@ export function InstallScript() {
         </div>
       </div>
 
+      {/* Runner ID */}
+      <div className="space-y-2">
+        <Label htmlFor="runner-id">Runner ID</Label>
+        <Input
+          id="runner-id"
+          value={runnerId}
+          onChange={(e) => setRunnerId(e.target.value)}
+          placeholder="ID du runner (depuis la liste des runners)"
+          className="font-mono text-sm"
+          disabled={isLoading}
+        />
+        <p className="text-xs text-muted-foreground">
+          L'ID du runner créé dans la liste des agents. Copiez-le depuis la colonne ID.
+        </p>
+      </div>
+
+      {/* Token */}
       <div className="space-y-2">
         <Label htmlFor="runner-token">Token d'authentification</Label>
         <div className="flex gap-2">
@@ -127,25 +145,26 @@ export function InstallScript() {
         </p>
       </div>
 
-      {token && (
+      {/* Install Command - show only when both token AND runnerId are set */}
+      {token && runnerId && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label>Commande d'installation</Label>
             <Button
-              variant="ghost"
+              variant="default"
               size="sm"
               onClick={handleCopy}
               className="h-8"
             >
               {copied ? (
                 <>
-                  <Check className="w-4 h-4 mr-1 text-green-500" />
-                  Copié
+                  <Check className="w-4 h-4 mr-1" />
+                  Copié !
                 </>
               ) : (
                 <>
                   <Copy className="w-4 h-4 mr-1" />
-                  Copier
+                  Copier la commande
                 </>
               )}
             </Button>
@@ -160,6 +179,14 @@ export function InstallScript() {
           <p className="text-xs text-muted-foreground">
             Exécutez cette commande <strong>en tant que root</strong> sur votre serveur pour installer et enregistrer le runner.
           </p>
+        </div>
+      )}
+      
+      {/* Missing fields warning */}
+      {token && !runnerId && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30 border border-border/50 text-muted-foreground">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <p className="text-sm">Renseignez le Runner ID pour afficher la commande d'installation.</p>
         </div>
       )}
     </div>
