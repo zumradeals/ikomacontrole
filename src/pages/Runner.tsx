@@ -1,16 +1,14 @@
-import { Server, RefreshCw, Terminal, ExternalLink, HardDrive } from 'lucide-react';
+import { Server, RefreshCw, ExternalLink, HardDrive, Settings2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
-import { useAppMode } from '@/contexts/AppModeContext';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { RunnersTable } from '@/components/runner/RunnersTable';
-import { InstallScript } from '@/components/runner/InstallScript';
+import { RunnerInstallWizard } from '@/components/runner/RunnerInstallWizard';
 import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 
 const Runner = () => {
-  const { isExpert } = useAppMode();
   const { data: runners, refetch: refetchRunners, isLoading: runnersLoading } = useRunners();
   const { data: infrastructures } = useInfrastructures();
 
@@ -31,7 +29,7 @@ const Runner = () => {
         }
       />
 
-      {/* API Status (read-only) */}
+      {/* API Status */}
       <div className="glass-panel rounded-xl p-4 sm:p-5">
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-sm sm:text-base">État de l'API</h3>
@@ -42,54 +40,8 @@ const Runner = () => {
             </Button>
           </Link>
         </div>
-        
         <ApiHealthCheck />
       </div>
-
-      {/* Empty state with CTA */}
-      {!hasRunners && !runnersLoading && (
-        <div className="glass-panel rounded-xl p-6 sm:p-8 glow-border">
-          <div className="text-center">
-            <Server className="w-12 h-12 mx-auto mb-4 text-primary opacity-50" />
-            <h3 className="text-lg font-semibold mb-2">Aucun agent enregistré</h3>
-            <p className="text-muted-foreground text-sm max-w-md mx-auto mb-6">
-              Installez un agent sur votre serveur pour commencer à exécuter des ordres.
-              {!hasInfra && (
-                <span className="block mt-2 text-amber-400">
-                  💡 Conseil : déclarez d'abord un serveur dans la section Serveurs.
-                </span>
-              )}
-            </p>
-            
-            <div className="space-y-4">
-              <InstallScript />
-            </div>
-
-            {!hasInfra && (
-              <div className="mt-6 pt-6 border-t border-border/50">
-                <Link to="/infra">
-                  <Button variant="outline" size="sm">
-                    <HardDrive className="w-4 h-4 mr-2" />
-                    Déclarer un serveur
-                  </Button>
-                </Link>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Installation Script - Expert mode */}
-      {isExpert && (
-        <div className="glass-panel rounded-xl p-4 sm:p-5">
-          <div className="flex items-center gap-2 mb-3 sm:mb-4">
-            <Terminal className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-            <h3 className="font-semibold text-sm sm:text-base">Script d'Installation</h3>
-          </div>
-          
-          <InstallScript />
-        </div>
-      )}
 
       {/* Runners Table */}
       {(hasRunners || runnersLoading) && (
@@ -108,6 +60,30 @@ const Runner = () => {
           </div>
         </div>
       )}
+
+      {/* Installation Wizard */}
+      <div className="glass-panel rounded-xl p-4 sm:p-5 glow-border">
+        <div className="flex items-center gap-2 mb-4">
+          <Settings2 className="w-5 h-5 text-primary" />
+          <h3 className="font-semibold text-sm sm:text-base">Installation Agent</h3>
+        </div>
+
+        {!hasInfra && (
+          <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400">
+            <p className="text-sm">
+              💡 <strong>Conseil :</strong> déclarez d'abord un serveur dans la section Serveurs avant d'installer un agent.
+            </p>
+            <Link to="/infra" className="inline-block mt-2">
+              <Button variant="outline" size="sm">
+                <HardDrive className="w-4 h-4 mr-2" />
+                Déclarer un serveur
+              </Button>
+            </Link>
+          </div>
+        )}
+
+        <RunnerInstallWizard />
+      </div>
     </div>
   );
 };
