@@ -53,9 +53,12 @@ export function useProxyRunners() {
   return useQuery({
     queryKey: ['proxy-runners'],
     queryFn: async (): Promise<ProxyRunner[]> => {
+      const url = `${getProxyUrl()}/runners`;
+      console.log('FETCH_RUNNERS_REQUEST', url);
+      
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await fetch(`${getProxyUrl()}/runners`, {
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -63,12 +66,16 @@ export function useProxyRunners() {
         },
       });
 
+      console.log('FETCH_RUNNERS_RESPONSE', response.status);
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('FETCH_RUNNERS_ERROR', errorData);
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('FETCH_RUNNERS_SUCCESS', { count: data.runners?.length ?? 0 });
       return data.runners || [];
     },
     refetchInterval: 15000,
@@ -86,9 +93,14 @@ export function useProxyCreateRunner() {
 
   return useMutation({
     mutationFn: async ({ name, infrastructureId }: { name: string; infrastructureId?: string }): Promise<CreateRunnerResult> => {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('CREATE_RUNNER_REQUEST', { name, infrastructureId });
       
-      const response = await fetch(`${getProxyUrl()}/runners`, {
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `${getProxyUrl()}/runners`;
+      
+      console.log('CREATE_RUNNER_URL', url);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -100,12 +112,17 @@ export function useProxyCreateRunner() {
         }),
       });
 
+      console.log('CREATE_RUNNER_RESPONSE', response.status);
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('CREATE_RUNNER_ERROR', errorData);
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
-      return response.json();
+      const data = await response.json();
+      console.log('CREATE_RUNNER_SUCCESS', { id: data.id, name: data.name, hasToken: !!data.token });
+      return data;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });
@@ -134,25 +151,36 @@ export function useProxyResetToken() {
 
   return useMutation({
     mutationFn: async (runnerId: string): Promise<ResetTokenResult> => {
-      const { data: { session } } = await supabase.auth.getSession();
+      console.log('TOKEN_RESET_REQUEST', runnerId);
       
-      const response = await fetch(`${getProxyUrl()}/runners/${runnerId}/token/reset`, {
+      const { data: { session } } = await supabase.auth.getSession();
+      const url = `${getProxyUrl()}/runners/${runnerId}/token/reset`;
+      
+      console.log('TOKEN_RESET_URL', url);
+      
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
         },
+        body: JSON.stringify({}), // Required: non-empty body for Fastify
       });
+
+      console.log('TOKEN_RESET_RESPONSE', response.status);
 
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error('Endpoint token/reset non implémenté côté serveur');
         }
         const errorData = await response.json().catch(() => ({}));
+        console.error('TOKEN_RESET_ERROR', errorData);
         throw new Error(errorData.error || `HTTP ${response.status}`);
       }
 
-      return response.json();
+      const data = await response.json();
+      console.log('TOKEN_RESET_SUCCESS', { hasToken: !!data.token });
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });

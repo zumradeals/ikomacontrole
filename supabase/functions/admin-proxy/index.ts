@@ -140,6 +140,7 @@ serve(async (req) => {
           'Content-Type': 'application/json',
           'x-ikoma-admin-key': IKOMA_ADMIN_KEY,
         },
+        body: JSON.stringify({}), // Required: non-empty body for Fastify
       });
 
       if (!response.ok) {

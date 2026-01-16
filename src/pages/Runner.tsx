@@ -5,11 +5,12 @@ import { Button } from '@/components/ui/button';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { RunnersTable } from '@/components/runner/RunnersTable';
 import { RunnerInstallWizard } from '@/components/runner/RunnerInstallWizard';
-import { useRunners } from '@/hooks/useRunners';
+import { useProxyRunners } from '@/hooks/useProxyRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 
 const Runner = () => {
-  const { data: runners, refetch: refetchRunners, isLoading: runnersLoading } = useRunners();
+  // Use proxy instead of direct Supabase to avoid divergence
+  const { data: runners, refetch: refetchRunners, isLoading: runnersLoading } = useProxyRunners();
   const { data: infrastructures } = useInfrastructures();
 
   const hasRunners = (runners?.length ?? 0) > 0;
