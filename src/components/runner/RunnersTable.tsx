@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { Server, Wifi, WifiOff, Pause, HelpCircle, Cpu, HardDrive, MonitorSmartphone, Trash2, Building2 } from 'lucide-react';
 import { TestOrderButton } from './TestOrderButton';
 import { RunnerDiagnostics } from './RunnerDiagnostics';
-import { useRunners, useDeleteRunner } from '@/hooks/useRunners';
+import { useProxyRunners, ProxyRunner } from '@/hooks/useProxyRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
+import { useDeleteRunner } from '@/hooks/useRunners';
 import {
   Table,
   TableBody,
@@ -54,11 +55,27 @@ function formatMemory(memoryMb: number): string {
   return `${memoryMb} MB`;
 }
 
+// Convert ProxyRunner to display format
+function toDisplayRunner(runner: ProxyRunner) {
+  return {
+    id: runner.id,
+    name: runner.name,
+    status: runner.status,
+    infrastructure_id: runner.infrastructureId,
+    last_seen_at: runner.lastHeartbeatAt,
+    host_info: runner.hostInfo as HostInfo | null,
+  };
+}
+
 export function RunnersTable() {
-  const { data: runners, isLoading, error } = useRunners();
+  // Use proxy instead of direct Supabase to avoid divergence
+  const { data: proxyRunners, isLoading, error } = useProxyRunners();
   const { data: infrastructures } = useInfrastructures();
   const deleteRunner = useDeleteRunner();
   const [runnerToDelete, setRunnerToDelete] = useState<{ id: string; name: string } | null>(null);
+  
+  // Convert to display format
+  const runners = proxyRunners?.map(toDisplayRunner);
 
   const getInfraName = (infraId: string | null) => {
     if (!infraId || !infrastructures) return null;
@@ -220,7 +237,13 @@ export function RunnersTable() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1">
-                    <RunnerDiagnostics runner={runner} />
+                    <RunnerDiagnostics runner={{
+                      id: runner.id,
+                      name: runner.name,
+                      status: runner.status as 'online' | 'offline' | 'paused' | 'unknown',
+                      last_seen_at: runner.last_seen_at,
+                      infrastructure_id: runner.infrastructure_id,
+                    }} />
                     <TestOrderButton 
                       runnerId={runner.id} 
                       runnerName={runner.name}
