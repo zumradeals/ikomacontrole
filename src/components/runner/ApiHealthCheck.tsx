@@ -13,7 +13,7 @@ interface HealthResult {
 }
 
 export function ApiHealthCheck() {
-  const { baseUrl, isLoading: urlsLoading } = useApiUrls();
+  const { v1Url, isLoading: urlsLoading } = useApiUrls();
 
   const [health, setHealth] = useState<HealthResult>({
     status: 'checking',
@@ -21,7 +21,7 @@ export function ApiHealthCheck() {
   });
 
   const performHealthCheck = async () => {
-    if (!baseUrl) {
+    if (!v1Url) {
       setHealth({ status: 'error', message: "URL API non configurée" });
       return;
     }
@@ -31,7 +31,8 @@ export function ApiHealthCheck() {
     const startTime = Date.now();
 
     try {
-      const response = await fetch(`${baseUrl}/health`, { method: 'GET' });
+      // Use /v1/health endpoint - the root / doesn't exist
+      const response = await fetch(`${v1Url}/health`, { method: 'GET' });
       const latency = Date.now() - startTime;
       const data = await response.json().catch(() => ({}));
 
@@ -63,7 +64,7 @@ export function ApiHealthCheck() {
   useEffect(() => {
     performHealthCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl]);
+  }, [v1Url]);
 
   const statusColors = {
     checking: 'text-muted-foreground',
@@ -87,8 +88,8 @@ export function ApiHealthCheck() {
         />
         <div>
           <p className={`text-sm font-medium ${statusColors[health.status]}`}>{health.message}</p>
-          <p className="text-xs text-muted-foreground">
-            {baseUrl || '—'}
+        <p className="text-xs text-muted-foreground">
+            {v1Url || '—'}
             {health.latency !== undefined && health.status !== 'checking' && <> • Latence: {health.latency}ms</>}
             {health.version && ` • v${health.version}`}
           </p>

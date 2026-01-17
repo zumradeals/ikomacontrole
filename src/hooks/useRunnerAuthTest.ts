@@ -32,14 +32,14 @@ export function useTestRunnerAuth() {
 
   return useMutation({
     mutationFn: async ({ runnerId, token }: { runnerId: string; token: string }): Promise<HeartbeatTestResult> => {
+      // Use Authorization: Bearer token for runner auth (no admin key, no x-runner-* headers)
       const response = await fetch(`${v1Url}/runner/heartbeat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-runner-id': runnerId,
-          'x-runner-token': token,
+          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ runner_id: runnerId }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -71,14 +71,14 @@ export function useTestClaimNext() {
 
   return useMutation({
     mutationFn: async ({ runnerId, token }: { runnerId: string; token: string }): Promise<ClaimNextTestResult> => {
+      // Use Authorization: Bearer token for runner auth
       const response = await fetch(`${v1Url}/runner/orders/claim-next`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-runner-id': runnerId,
-          'x-runner-token': token,
+          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ runner_id: runnerId }),
       });
 
       if (response.status === 204) {
