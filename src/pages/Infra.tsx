@@ -26,11 +26,24 @@ import {
   Infrastructure,
   InfrastructureInput,
 } from '@/hooks/useInfrastructures';
-import { useRunners } from '@/hooks/useRunners';
+import { useProxyRunners, ProxyRunner } from '@/hooks/useProxyRunners';
+
+// Map ProxyRunner to the format expected by InfraDetails
+function mapProxyRunnerToLocal(runner: ProxyRunner) {
+  return {
+    id: runner.id,
+    name: runner.name,
+    status: runner.status,
+    infrastructure_id: runner.infrastructureId,
+    last_seen_at: runner.lastHeartbeatAt,
+    host_info: runner.hostInfo || null,
+  };
+}
 
 const Infra = () => {
   const { data: infrastructures, isLoading, refetch } = useInfrastructures();
-  const { data: runners } = useRunners();
+  const { data: proxyRunners } = useProxyRunners();
+  const runners = proxyRunners?.map(mapProxyRunnerToLocal);
   const createInfra = useCreateInfrastructure();
   const updateInfra = useUpdateInfrastructure();
   const deleteInfra = useDeleteInfrastructure();
