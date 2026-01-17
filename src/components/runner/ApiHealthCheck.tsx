@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useApiUrls } from '@/hooks/useApiUrls';
+import { supabase } from '@/integrations/supabase/client';
 
 type HealthStatus = 'checking' | 'online' | 'offline' | 'error';
 
@@ -13,43 +13,45 @@ interface HealthResult {
 }
 
 export function ApiHealthCheck() {
-  const { v1Url, isLoading: urlsLoading } = useApiUrls();
-
   const [health, setHealth] = useState<HealthResult>({
     status: 'checking',
     message: 'Vérification en cours...',
   });
 
   const performHealthCheck = async () => {
-    if (!v1Url) {
-      setHealth({ status: 'error', message: "URL API non configurée" });
-      return;
-    }
-
     setHealth({ status: 'checking', message: 'Vérification en cours...' });
 
     const startTime = Date.now();
 
     try {
-      // Use /v1/health endpoint - the root / doesn't exist
-      const response = await fetch(`${v1Url}/health`, { method: 'GET' });
-      const latency = Date.now() - startTime;
-      const data = await response.json().catch(() => ({}));
+      // Use runner-proxy Edge Function instead of direct call to avoid CORS/Fetch issues
+      // We use a dummy runnerId/token for health check as it's usually public or doesn't require specific runner auth
+      const { data, error } = await supabase.functions.invoke('runner-proxy', {
+        body: {
+          method: 'GET',
+          path: '/health',
+          runnerId: 'health-check',
+          runnerToken: 'health-check',
+        },
+      });
 
-      if (response.ok) {
+      const latency = Date.now() - startTime;
+
+      if (error) {
         setHealth({
-          status: 'online',
-          message: 'API joignable',
+          status: 'offline',
+          message: error.message || 'Proxy unreachable',
           latency,
-          version: data.version,
         });
         return;
       }
 
+      // If we got data, the API is reachable through the proxy
       setHealth({
-        status: 'error',
-        message: data.message || data.error || `HTTP ${response.status}`,
+        status: 'online',
+        message: 'API joignable (via proxy)',
         latency,
+        version: data?.version,
       });
     } catch (e) {
       const latency = Date.now() - startTime;
@@ -64,7 +66,7 @@ export function ApiHealthCheck() {
   useEffect(() => {
     performHealthCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [v1Url]);
+  }, []);
 
   const statusColors = {
     checking: 'text-muted-foreground',
@@ -88,8 +90,8 @@ export function ApiHealthCheck() {
         />
         <div>
           <p className={`text-sm font-medium ${statusColors[health.status]}`}>{health.message}</p>
-        <p className="text-xs text-muted-foreground">
-            {v1Url || '—'}
+          <p className="text-xs text-muted-foreground">
+            IKOMA API Proxy
             {health.latency !== undefined && health.status !== 'checking' && <> • Latence: {health.latency}ms</>}
             {health.version && ` • v${health.version}`}
           </p>
@@ -99,7 +101,7 @@ export function ApiHealthCheck() {
         variant="ghost"
         size="sm"
         onClick={performHealthCheck}
-        disabled={urlsLoading || health.status === 'checking'}
+        disabled={health.status === 'checking'}
       >
         <RefreshCw className={`w-4 h-4 ${health.status === 'checking' ? 'animate-spin' : ''}`} />
       </Button>
