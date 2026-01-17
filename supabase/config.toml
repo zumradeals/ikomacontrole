@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.runner-proxy]
 verify_jwt = false
+
+[functions.public-proxy]
+verify_jwt = false
