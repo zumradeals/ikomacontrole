@@ -23,9 +23,9 @@ export function useApiUrls() {
   const { getSetting, isLoading } = useSettings();
 
   const urls = useMemo(() => {
-    // Priority: env var > setting > default
-    const baseUrl = ENV_API_BASE_URL || getSetting(SETTING_API_BASE_URL) || DEFAULT_API_BASE_URL;
-    const v1Url = ENV_API_V1_URL || getSetting(SETTING_API_V1_URL) || DEFAULT_API_V1_URL;
+    // Priority: database setting > env var > default
+    const baseUrl = getSetting(SETTING_API_BASE_URL) || ENV_API_BASE_URL || DEFAULT_API_BASE_URL;
+    const v1Url = getSetting(SETTING_API_V1_URL) || ENV_API_V1_URL || DEFAULT_API_V1_URL;
 
     return {
       baseUrl,
