@@ -34,7 +34,7 @@ export function useTestRunnerAuth() {
       console.log('RUNNER_AUTH_TEST_REQUEST', { runnerId: runnerId.slice(0, 8) + '...' });
 
       try {
-        const { data, error, status } = await supabase.functions.invoke('runner-proxy', {
+        const { data, error } = await supabase.functions.invoke('runner-proxy', {
           body: {
             method: 'POST',
             path: '/runner/heartbeat',
@@ -44,67 +44,73 @@ export function useTestRunnerAuth() {
           },
         });
 
+        // Extract status from error context or default based on error presence
+        // The edge function returns JSON with the status embedded in the response
+        const httpStatus = error?.context?.status ?? (error ? 500 : 200);
+
         console.log('RUNNER_AUTH_TEST_RESPONSE', { 
           status: error ? 'error' : 'success', 
-          httpStatus: status,
+          httpStatus,
           error: error?.message,
           data 
         });
 
         // 1. Handle Supabase/Network errors (Failed to fetch the function itself)
         if (error) {
+          // Check if it's a relay error with status in message
+          const statusMatch = error.message?.match(/Edge Function returned a non-2xx status code: (\d+)/);
+          const extractedStatus = statusMatch ? parseInt(statusMatch[1], 10) : httpStatus;
+          
+          if (extractedStatus === 401 || extractedStatus === 403) {
+            return {
+              success: false,
+              message: 'Token invalide ou expiré',
+              status: extractedStatus,
+              errorType: 'auth',
+            };
+          }
+          
+          if (extractedStatus === 502) {
+            return {
+              success: false,
+              message: data?.message || 'API backend down or unreachable',
+              status: 502,
+              errorType: 'server',
+            };
+          }
+          
           return {
             success: false,
-            message: `Proxy unreachable / CORS / DNS: ${error.message}`,
-            status: status || 500,
+            message: `Proxy error: ${error.message}`,
+            status: extractedStatus,
             errorType: 'network',
           };
         }
 
-        // 2. Handle specific proxy errors (502 from our proxy means backend is down)
-        if (status === 502) {
+        // 2. Check for error in data payload (our proxy returns errors in body)
+        if (data?.error) {
+          const status = data.status || 500;
+          if (status === 401 || status === 403) {
+            return {
+              success: false,
+              message: 'Token invalide ou expiré',
+              status,
+              errorType: 'auth',
+            };
+          }
           return {
             success: false,
-            message: data?.message || 'API backend down or unreachable',
-            status: 502,
-            errorType: 'server',
-          };
-        }
-
-        // 3. Handle Auth errors (401/403)
-        if (status === 401 || status === 403) {
-          return {
-            success: false,
-            message: 'Token invalide ou expiré',
+            message: data.message || data.error || 'Erreur serveur API',
             status,
-            errorType: 'auth',
+            errorType: status >= 500 ? 'server' : 'proxy',
           };
         }
 
-        // 4. Handle other server errors (5xx)
-        if (status >= 500) {
-          return {
-            success: false,
-            message: data?.message || data?.error || 'Erreur serveur API',
-            status,
-            errorType: 'server',
-          };
-        }
-
-        // 5. Success (200 OK)
-        if (status >= 200 && status < 300) {
-          return {
-            success: true,
-            message: 'Authentification réussie',
-            status,
-          };
-        }
-
-        // Fallback
+        // 3. Success
         return {
-          success: false,
-          message: data?.message || data?.error || `Erreur inconnue (HTTP ${status})`,
-          status: status || 500,
+          success: true,
+          message: 'Authentification réussie',
+          status: 200,
         };
       } catch (e) {
         return {
@@ -128,7 +134,7 @@ export function useTestClaimNext() {
       console.log('RUNNER_CLAIM_NEXT_REQUEST', { runnerId: runnerId.slice(0, 8) + '...' });
 
       try {
-        const { data, error, status } = await supabase.functions.invoke('runner-proxy', {
+        const { data, error } = await supabase.functions.invoke('runner-proxy', {
           body: {
             method: 'POST',
             path: '/runner/orders/claim-next',
@@ -138,25 +144,40 @@ export function useTestClaimNext() {
           },
         });
 
+        const httpStatus = error?.context?.status ?? (error ? 500 : 200);
+
         console.log('RUNNER_CLAIM_NEXT_RESPONSE', { 
           status: error ? 'error' : 'success', 
-          httpStatus: status,
+          httpStatus,
           error: error?.message,
           data 
         });
 
         if (error) {
+          const statusMatch = error.message?.match(/Edge Function returned a non-2xx status code: (\d+)/);
+          const extractedStatus = statusMatch ? parseInt(statusMatch[1], 10) : httpStatus;
+          
+          if (extractedStatus === 401 || extractedStatus === 403) {
+            return {
+              success: false,
+              hasOrder: false,
+              message: 'Token invalide',
+              status: extractedStatus,
+              errorType: 'auth',
+            };
+          }
+          
           return {
             success: false,
             hasOrder: false,
-            message: `Proxy unreachable: ${error.message}`,
-            status: status || 500,
+            message: `Proxy error: ${error.message}`,
+            status: extractedStatus,
             errorType: 'network',
           };
         }
 
-        // Handle 204 No Content
-        if (status === 204 || (!data && status === 200)) {
+        // Handle empty data (204 No Content equivalent)
+        if (!data || data === null) {
           return {
             success: true,
             hasOrder: false,
@@ -165,21 +186,13 @@ export function useTestClaimNext() {
           };
         }
 
-        if (status === 401 || status === 403) {
+        // Check for error in data payload
+        if (data?.error) {
+          const status = data.status || 500;
           return {
             success: false,
             hasOrder: false,
-            message: 'Token invalide',
-            status,
-            errorType: 'auth',
-          };
-        }
-
-        if (status >= 400) {
-          return {
-            success: false,
-            hasOrder: false,
-            message: data?.message || data?.error || `Erreur API (HTTP ${status})`,
+            message: data.message || data.error || `Erreur API`,
             status,
             errorType: status >= 500 ? 'server' : 'auth',
           };
