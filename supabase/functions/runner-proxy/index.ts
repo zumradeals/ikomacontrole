@@ -2,7 +2,7 @@
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-runner-id, x-runner-token",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
@@ -16,7 +16,10 @@ Deno.serve(async (req) => {
     const baseUrl = Deno.env.get("AUTOMATE_BASE_URL");
     if (!baseUrl) {
       console.error("[runner-proxy] Missing AUTOMATE_BASE_URL secret");
-      return new Response(JSON.stringify({ error: "Missing AUTOMATE_BASE_URL" }), {
+      return new Response(JSON.stringify({ 
+        error: "Configuration Error", 
+        message: "Missing AUTOMATE_BASE_URL in Supabase Secrets" 
+      }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -24,18 +27,21 @@ Deno.serve(async (req) => {
 
     const { method, path, runnerId, runnerToken, body } = await req.json();
 
-    console.log("[runner-proxy] Request received:", { method, path, runnerId: runnerId?.slice(0, 8) + "..." });
+    console.info("proxy_request", { path, method, runnerId: runnerId?.slice(0, 8) + "..." });
 
     if (!path || !runnerId || !runnerToken) {
       console.error("[runner-proxy] Missing required fields");
-      return new Response(JSON.stringify({ error: "path, runnerId, runnerToken are required" }), {
+      return new Response(JSON.stringify({ 
+        error: "Bad Request", 
+        message: "path, runnerId, runnerToken are required" 
+      }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const targetUrl = `${baseUrl}/v1${path}`;
-    console.log("[runner-proxy] Forwarding to:", targetUrl);
+    console.info("proxy_target", targetUrl);
 
     // Build headers with both auth models for maximum compatibility
     const headers: Record<string, string> = {
@@ -56,28 +62,48 @@ Deno.serve(async (req) => {
       fetchOptions.body = JSON.stringify(body ?? {});
     }
 
-    const res = await fetch(targetUrl, fetchOptions);
+    try {
+      const res = await fetch(targetUrl, fetchOptions);
+      console.info("proxy_status", res.status);
 
-    console.log("[runner-proxy] Backend response status:", res.status);
+      const contentType = res.headers.get("content-type") || "";
+      let data: unknown;
 
-    const contentType = res.headers.get("content-type") || "";
-    let data: unknown;
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        data = { message: await res.text() };
+      }
 
-    if (contentType.includes("application/json")) {
-      data = await res.json();
-    } else {
-      data = await res.text();
+      // If backend returns 204 No Content, data might be empty
+      if (res.status === 204) {
+        return new Response(null, {
+          status: 204,
+          headers: corsHeaders,
+        });
+      }
+
+      return new Response(JSON.stringify(data), {
+        status: res.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } catch (fetchError) {
+      console.error("proxy_fetch_error", fetchError);
+      return new Response(JSON.stringify({ 
+        error: "API Unreachable", 
+        message: "Failed to connect to the backend API. It might be down or unreachable from the edge function.",
+        details: String(fetchError)
+      }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
-
-    console.log("[runner-proxy] Response data:", typeof data === "object" ? JSON.stringify(data) : data);
-
-    return new Response(JSON.stringify(data), {
-      status: res.status,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
   } catch (e) {
-    console.error("[runner-proxy] Error:", String(e));
-    return new Response(JSON.stringify({ error: String(e) }), {
+    console.error("[runner-proxy] Internal Error:", String(e));
+    return new Response(JSON.stringify({ 
+      error: "Internal Proxy Error", 
+      message: String(e) 
+    }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -9,6 +9,7 @@ interface HeartbeatTestResult {
   success: boolean;
   message: string;
   status: number;
+  errorType?: 'network' | 'auth' | 'server' | 'proxy';
 }
 
 interface ClaimNextTestResult {
@@ -16,6 +17,7 @@ interface ClaimNextTestResult {
   hasOrder: boolean;
   message: string;
   status: number;
+  errorType?: 'network' | 'auth' | 'server' | 'proxy';
 }
 
 // ============================================
@@ -31,45 +33,87 @@ export function useTestRunnerAuth() {
     mutationFn: async ({ runnerId, token }: { runnerId: string; token: string }): Promise<HeartbeatTestResult> => {
       console.log('RUNNER_AUTH_TEST_REQUEST', { runnerId: runnerId.slice(0, 8) + '...' });
 
-      const { data, error } = await supabase.functions.invoke('runner-proxy', {
-        body: {
-          method: 'POST',
-          path: '/runner/heartbeat',
-          runnerId,
-          runnerToken: token,
-          body: {},
-        },
-      });
+      try {
+        const { data, error, status } = await supabase.functions.invoke('runner-proxy', {
+          body: {
+            method: 'POST',
+            path: '/runner/heartbeat',
+            runnerId,
+            runnerToken: token,
+            body: {},
+          },
+        });
 
-      console.log('RUNNER_AUTH_TEST_RESPONSE', { 
-        status: error ? 'error' : 'success', 
-        error: error?.message,
-        data 
-      });
+        console.log('RUNNER_AUTH_TEST_RESPONSE', { 
+          status: error ? 'error' : 'success', 
+          httpStatus: status,
+          error: error?.message,
+          data 
+        });
 
-      if (error) {
+        // 1. Handle Supabase/Network errors (Failed to fetch the function itself)
+        if (error) {
+          return {
+            success: false,
+            message: `Proxy unreachable / CORS / DNS: ${error.message}`,
+            status: status || 500,
+            errorType: 'network',
+          };
+        }
+
+        // 2. Handle specific proxy errors (502 from our proxy means backend is down)
+        if (status === 502) {
+          return {
+            success: false,
+            message: data?.message || 'API backend down or unreachable',
+            status: 502,
+            errorType: 'server',
+          };
+        }
+
+        // 3. Handle Auth errors (401/403)
+        if (status === 401 || status === 403) {
+          return {
+            success: false,
+            message: 'Token invalide ou expiré',
+            status,
+            errorType: 'auth',
+          };
+        }
+
+        // 4. Handle other server errors (5xx)
+        if (status >= 500) {
+          return {
+            success: false,
+            message: data?.message || data?.error || 'Erreur serveur API',
+            status,
+            errorType: 'server',
+          };
+        }
+
+        // 5. Success (200 OK)
+        if (status >= 200 && status < 300) {
+          return {
+            success: true,
+            message: 'Authentification réussie',
+            status,
+          };
+        }
+
+        // Fallback
         return {
           success: false,
-          message: error.message || 'Erreur de connexion au proxy',
-          status: 500,
+          message: data?.message || data?.error || `Erreur inconnue (HTTP ${status})`,
+          status: status || 500,
         };
-      }
-
-      // Check if the backend returned success
-      if (data?.ok === true) {
+      } catch (e) {
         return {
-          success: true,
-          message: 'Authentification réussie',
-          status: 200,
+          success: false,
+          message: e instanceof Error ? e.message : 'Erreur réseau critique',
+          status: 500,
+          errorType: 'network',
         };
       }
-
-      // Handle error responses from the backend
-      return {
-        success: false,
-        message: data?.message || data?.error || 'Erreur d\'authentification',
-        status: data?.status || 401,
-      };
     },
   });
 }
@@ -83,25 +127,36 @@ export function useTestClaimNext() {
     mutationFn: async ({ runnerId, token }: { runnerId: string; token: string }): Promise<ClaimNextTestResult> => {
       console.log('RUNNER_CLAIM_NEXT_REQUEST', { runnerId: runnerId.slice(0, 8) + '...' });
 
-      const { data, error } = await supabase.functions.invoke('runner-proxy', {
-        body: {
-          method: 'POST',
-          path: '/runner/orders/claim-next',
-          runnerId,
-          runnerToken: token,
-          body: {},
-        },
-      });
+      try {
+        const { data, error, status } = await supabase.functions.invoke('runner-proxy', {
+          body: {
+            method: 'POST',
+            path: '/runner/orders/claim-next',
+            runnerId,
+            runnerToken: token,
+            body: {},
+          },
+        });
 
-      console.log('RUNNER_CLAIM_NEXT_RESPONSE', { 
-        status: error ? 'error' : 'success', 
-        error: error?.message,
-        data 
-      });
+        console.log('RUNNER_CLAIM_NEXT_RESPONSE', { 
+          status: error ? 'error' : 'success', 
+          httpStatus: status,
+          error: error?.message,
+          data 
+        });
 
-      if (error) {
-        // Check if it's a 204 (no content) which means no orders available
-        if (error.message?.includes('204')) {
+        if (error) {
+          return {
+            success: false,
+            hasOrder: false,
+            message: `Proxy unreachable: ${error.message}`,
+            status: status || 500,
+            errorType: 'network',
+          };
+        }
+
+        // Handle 204 No Content
+        if (status === 204 || (!data && status === 200)) {
           return {
             success: true,
             hasOrder: false,
@@ -109,31 +164,42 @@ export function useTestClaimNext() {
             status: 204,
           };
         }
+
+        if (status === 401 || status === 403) {
+          return {
+            success: false,
+            hasOrder: false,
+            message: 'Token invalide',
+            status,
+            errorType: 'auth',
+          };
+        }
+
+        if (status >= 400) {
+          return {
+            success: false,
+            hasOrder: false,
+            message: data?.message || data?.error || `Erreur API (HTTP ${status})`,
+            status,
+            errorType: status >= 500 ? 'server' : 'auth',
+          };
+        }
+
+        return {
+          success: true,
+          hasOrder: true,
+          message: 'Ordre récupéré',
+          status: 200,
+        };
+      } catch (e) {
         return {
           success: false,
           hasOrder: false,
-          message: error.message || 'Erreur de connexion au proxy',
+          message: e instanceof Error ? e.message : 'Erreur réseau critique',
           status: 500,
+          errorType: 'network',
         };
       }
-
-      // Empty response or null data means 204 No Content
-      if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
-        return {
-          success: true,
-          hasOrder: false,
-          message: 'Aucun ordre en attente',
-          status: 204,
-        };
-      }
-
-      // If we got data, there's an order
-      return {
-        success: true,
-        hasOrder: true,
-        message: 'Ordre récupéré',
-        status: 200,
-      };
     },
   });
 }
