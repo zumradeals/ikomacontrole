@@ -20,7 +20,9 @@ import {
   XCircle,
   Package,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Plus,
+  Unlink
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -40,27 +42,24 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs';
 import { Infrastructure } from '@/hooks/useInfrastructures';
-import { useProxyAssociateRunner } from '@/hooks/useProxyRunners';
+import { 
+  useProxyRunnersV2, 
+  useAttachRunner, 
+  useDetachRunner,
+  type ProxyRunner 
+} from '@/hooks/useProxyServers';
 import { useSettings } from '@/hooks/useSettings';
 import { useInstalledCapabilities, GROUP_DISPLAY } from '@/hooks/useInstalledCapabilities';
 import { ReinstallScript } from '@/components/runner/ReinstallScript';
 import { RunnerLogs } from '@/components/runner/RunnerLogs';
 import { OrdersHistory } from './OrdersHistory';
+import { ServerDiagnostics } from './ServerDiagnostics';
+import { CreateRunnerDialog } from './CreateRunnerDialog';
 import { formatDistanceToNow, format, differenceInSeconds } from 'date-fns';
 import { fr } from 'date-fns/locale';
 
-interface Runner {
-  id: string;
-  name: string;
-  status: string;
-  infrastructure_id: string | null;
-  last_seen_at: string | null;
-  host_info: Record<string, unknown> | null;
-}
-
 interface InfraDetailsProps {
   infrastructure: Infrastructure;
-  runners: Runner[];
   onBack: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -85,10 +84,22 @@ const statusColors: Record<string, string> = {
   unknown: 'bg-muted-foreground/30',
 };
 
+// Map ProxyRunner to local format for sub-components
+function mapRunnerToLocal(runner: ProxyRunner) {
+  return {
+    id: runner.id,
+    name: runner.name,
+    status: runner.status,
+    infrastructure_id: runner.infrastructureId,
+    last_seen_at: runner.lastHeartbeatAt,
+    host_info: runner.hostInfo || null,
+  };
+}
+
 // Health Dashboard Component
-function HealthDashboard({ runner, infrastructure }: { runner: Runner | null; infrastructure: Infrastructure }) {
+function HealthDashboard({ runner, infrastructure }: { runner: ProxyRunner | null; infrastructure: Infrastructure }) {
   const isOnline = runner?.status === 'online';
-  const lastSeen = runner?.last_seen_at ? new Date(runner.last_seen_at) : null;
+  const lastSeen = runner?.lastHeartbeatAt ? new Date(runner.lastHeartbeatAt) : null;
   const secondsAgo = lastSeen ? differenceInSeconds(new Date(), lastSeen) : null;
   
   const getHealthScore = () => {
@@ -170,7 +181,7 @@ function HealthDashboard({ runner, infrastructure }: { runner: Runner | null; in
             <AlertTriangle className="w-4 h-4 text-yellow-500 mt-0.5 shrink-0" />
             <div className="text-sm">
               {!runner ? (
-                <p>Aucun agent associé. <Link to="/runner" className="text-primary underline">Installer un agent</Link> pour gérer ce serveur.</p>
+                <p>Aucun agent associé. Associez un agent existant ou créez-en un nouveau.</p>
               ) : (
                 <p>L'agent est hors ligne depuis {lastSeen ? formatDistanceToNow(lastSeen, { locale: fr }) : 'un moment'}. Vérifiez la connexion.</p>
               )}
@@ -304,32 +315,54 @@ function InstalledSoftware({ infrastructureId, runnerId }: { infrastructureId: s
   );
 }
 
-export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete }: InfraDetailsProps) {
-  const associateRunner = useProxyAssociateRunner();
+export function InfraDetails({ infrastructure, onBack, onEdit, onDelete }: InfraDetailsProps) {
   const { getSetting } = useSettings();
   const [selectedRunner, setSelectedRunner] = useState<string>('');
   const [reinstallDialogOpen, setReinstallDialogOpen] = useState(false);
-  const [selectedRunnerForReinstall, setSelectedRunnerForReinstall] = useState<Runner | null>(null);
+  const [createRunnerOpen, setCreateRunnerOpen] = useState(false);
+  const [selectedRunnerForReinstall, setSelectedRunnerForReinstall] = useState<ReturnType<typeof mapRunnerToLocal> | null>(null);
+  
+  // Fetch runners from API (source of truth)
+  const { data: apiRunners, isLoading: runnersLoading, refetch: refetchRunners } = useProxyRunnersV2();
+  const attachMutation = useAttachRunner();
+  const detachMutation = useDetachRunner();
   
   const apiBaseUrl = getSetting('runner_base_url');
 
   const TypeIcon = typeIcons[infrastructure.type] || HardDrive;
   const caps = (infrastructure.capabilities as Record<string, unknown>) || {};
   
-  const associatedRunners = runners.filter(r => r.infrastructure_id === infrastructure.id);
-  const availableRunners = runners.filter(r => !r.infrastructure_id);
+  // Filter runners based on API data
+  const associatedRunners = (apiRunners || []).filter(r => 
+    r.infrastructureId === infrastructure.id || r.serverId === infrastructure.id
+  );
+  const availableRunners = (apiRunners || []).filter(r => 
+    !r.infrastructureId && !r.serverId
+  );
   const primaryRunner = associatedRunners[0] || null;
 
-  const handleAssociate = () => {
+  const handleAssociate = async () => {
     if (selectedRunner) {
-      associateRunner.mutate({ runnerId: selectedRunner, infrastructureId: infrastructure.id });
+      await attachMutation.mutateAsync({ 
+        serverId: infrastructure.id, 
+        runnerId: selectedRunner 
+      });
       setSelectedRunner('');
+      // Refetch to confirm from API
+      setTimeout(() => refetchRunners(), 500);
     }
   };
 
-  const handleDissociate = (runnerId: string) => {
-    associateRunner.mutate({ runnerId, infrastructureId: null });
+  const handleDissociate = async (runnerId: string) => {
+    await detachMutation.mutateAsync({ 
+      runnerId, 
+      serverId: infrastructure.id 
+    });
+    // Refetch to confirm from API
+    setTimeout(() => refetchRunners(), 500);
   };
+
+  const isPending = attachMutation.isPending || detachMutation.isPending;
 
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
@@ -363,6 +396,11 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
         </div>
 
         <div className="flex items-center gap-2 overflow-x-auto pb-2 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0">
+          <ServerDiagnostics 
+            serverId={infrastructure.id}
+            serverName={infrastructure.name}
+            expectedRunnerId={primaryRunner?.id}
+          />
           <Button variant="outline" size="sm" onClick={onEdit} className="shrink-0">
             <Pencil className="w-4 h-4 sm:mr-2" />
             <span className="hidden sm:inline">Modifier</span>
@@ -389,42 +427,69 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
         <div className="lg:col-span-2 space-y-4 sm:space-y-6">
           {/* Runners Section */}
           <section className="glass-panel rounded-xl p-4 sm:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                 Agents associés
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => refetchRunners()}
+                  disabled={runnersLoading}
+                >
+                  <RefreshCw className={`w-3 h-3 ${runnersLoading ? 'animate-spin' : ''}`} />
+                </Button>
               </h2>
               
-              {availableRunners.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <Select value={selectedRunner} onValueChange={setSelectedRunner}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Associer un agent" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRunners.map(runner => (
-                        <SelectItem key={runner.id} value={runner.id}>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${statusColors[runner.status]}`} />
-                            {runner.name}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedRunner && (
-                    <Button 
-                      size="sm" 
-                      onClick={handleAssociate}
-                      disabled={associateRunner.isPending}
-                    >
-                      Associer
-                    </Button>
-                  )}
-                </div>
-              )}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Create new runner button */}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setCreateRunnerOpen(true)}
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Créer un agent
+                </Button>
+                
+                {/* Attach existing runner */}
+                {availableRunners.length > 0 && (
+                  <>
+                    <Select value={selectedRunner} onValueChange={setSelectedRunner}>
+                      <SelectTrigger className="w-40 sm:w-48">
+                        <SelectValue placeholder="Associer existant" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableRunners.map(runner => (
+                          <SelectItem key={runner.id} value={runner.id}>
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${statusColors[runner.status]}`} />
+                              {runner.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {selectedRunner && (
+                      <Button 
+                        size="sm" 
+                        onClick={handleAssociate}
+                        disabled={isPending}
+                      >
+                        Associer
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
-            {associatedRunners.length > 0 ? (
+            {runnersLoading ? (
+              <div className="space-y-2">
+                {[1, 2].map(i => (
+                  <div key={i} className="h-16 bg-muted/30 rounded-lg animate-pulse" />
+                ))}
+              </div>
+            ) : associatedRunners.length > 0 ? (
               <div className="space-y-3">
                 {associatedRunners.map(runner => (
                   <div 
@@ -436,8 +501,8 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
                       <div>
                         <p className="font-medium">{runner.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {runner.status === 'online' ? 'En ligne' : 'Hors ligne'} • {runner.last_seen_at 
-                            ? format(new Date(runner.last_seen_at), "dd/MM/yyyy HH:mm:ss", { locale: fr })
+                          {runner.status === 'online' ? 'En ligne' : 'Hors ligne'} • {runner.lastHeartbeatAt 
+                            ? format(new Date(runner.lastHeartbeatAt), "dd/MM/yyyy HH:mm:ss", { locale: fr })
                             : 'Jamais vu'}
                         </p>
                       </div>
@@ -447,7 +512,7 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
                         variant="ghost" 
                         size="sm"
                         onClick={() => {
-                          setSelectedRunnerForReinstall(runner);
+                          setSelectedRunnerForReinstall(mapRunnerToLocal(runner));
                           setReinstallDialogOpen(true);
                         }}
                       >
@@ -464,11 +529,11 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
                         variant="ghost" 
                         size="sm"
                         onClick={() => handleDissociate(runner.id)}
-                        disabled={associateRunner.isPending}
+                        disabled={isPending}
                         className="text-destructive hover:text-destructive"
                       >
+                        <Unlink className="w-4 h-4 sm:mr-1" />
                         <span className="hidden sm:inline">Dissocier</span>
-                        <span className="sm:hidden">×</span>
                       </Button>
                     </div>
                   </div>
@@ -478,9 +543,15 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
               <div className="text-center py-8 text-muted-foreground">
                 <Server className="w-10 h-10 mx-auto mb-3 opacity-30" />
                 <p className="text-sm">Aucun agent associé à ce serveur</p>
-                {availableRunners.length === 0 && (
-                  <p className="text-xs mt-1">Créez un agent dans la page <Link to="/runner" className="text-primary underline">Agents</Link>.</p>
-                )}
+                <p className="text-xs mt-1 mb-4">
+                  {availableRunners.length > 0 
+                    ? 'Sélectionnez un agent existant ou créez-en un nouveau.'
+                    : 'Créez un nouvel agent pour ce serveur.'}
+                </p>
+                <Button onClick={() => setCreateRunnerOpen(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Créer un agent
+                </Button>
               </div>
             )}
           </section>
@@ -502,7 +573,7 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
                 </TabsContent>
                 
                 <TabsContent value="logs" className="mt-0">
-                  <RunnerLogs runner={associatedRunners[0]} />
+                  <RunnerLogs runner={mapRunnerToLocal(associatedRunners[0])} />
                 </TabsContent>
               </Tabs>
             </section>
@@ -583,7 +654,7 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
                 disabled={!primaryRunner}
                 onClick={() => {
                   if (primaryRunner) {
-                    setSelectedRunnerForReinstall(primaryRunner);
+                    setSelectedRunnerForReinstall(mapRunnerToLocal(primaryRunner));
                     setReinstallDialogOpen(true);
                   }
                 }}
@@ -617,6 +688,14 @@ export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete
           baseUrl={apiBaseUrl}
         />
       )}
+
+      {/* Create Runner Dialog */}
+      <CreateRunnerDialog
+        open={createRunnerOpen}
+        onOpenChange={setCreateRunnerOpen}
+        serverId={infrastructure.id}
+        serverName={infrastructure.name}
+      />
     </div>
   );
 }

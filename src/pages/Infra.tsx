@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { HardDrive, Plus, RefreshCw, Info, Server } from 'lucide-react';
+import { HardDrive, Plus, RefreshCw, Info } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,24 +25,11 @@ import {
   Infrastructure,
   InfrastructureInput,
 } from '@/hooks/useInfrastructures';
-import { useProxyRunners, ProxyRunner } from '@/hooks/useProxyRunners';
-
-// Map ProxyRunner to the format expected by InfraDetails
-function mapProxyRunnerToLocal(runner: ProxyRunner) {
-  return {
-    id: runner.id,
-    name: runner.name,
-    status: runner.status,
-    infrastructure_id: runner.infrastructureId,
-    last_seen_at: runner.lastHeartbeatAt,
-    host_info: runner.hostInfo || null,
-  };
-}
+import { useProxyRunnersV2 } from '@/hooks/useProxyServers';
 
 const Infra = () => {
   const { data: infrastructures, isLoading, refetch } = useInfrastructures();
-  const { data: proxyRunners } = useProxyRunners();
-  const runners = proxyRunners?.map(mapProxyRunnerToLocal);
+  const { data: apiRunners } = useProxyRunnersV2();
   const createInfra = useCreateInfrastructure();
   const updateInfra = useUpdateInfrastructure();
   const deleteInfra = useDeleteInfrastructure();
@@ -81,7 +67,9 @@ const Infra = () => {
   };
 
   const getRunnerCountForInfra = (infraId: string) => {
-    return runners?.filter(r => r.infrastructure_id === infraId).length || 0;
+    return (apiRunners || []).filter(r => 
+      r.infrastructureId === infraId || r.serverId === infraId
+    ).length;
   };
 
   // If viewing details, show the details page
@@ -103,7 +91,6 @@ const Infra = () => {
 
         <InfraDetails
           infrastructure={viewingInfra}
-          runners={runners || []}
           onBack={() => setViewingInfra(null)}
           onEdit={() => handleEdit(viewingInfra)}
           onDelete={() => setDeletingInfra(viewingInfra)}
@@ -116,7 +103,7 @@ const Infra = () => {
               <AlertDialogTitle>Supprimer l'infrastructure ?</AlertDialogTitle>
               <AlertDialogDescription>
                 Cette action est irréversible. L'infrastructure "{deletingInfra?.name}" sera supprimée.
-                {runners?.some(r => r.infrastructure_id === deletingInfra?.id) && (
+                {getRunnerCountForInfra(deletingInfra?.id || '') > 0 && (
                   <span className="block mt-2 text-amber-500">
                     ⚠️ Les runners associés seront automatiquement dissociés.
                   </span>
@@ -243,7 +230,7 @@ const Infra = () => {
             <AlertDialogTitle>Supprimer l'infrastructure ?</AlertDialogTitle>
             <AlertDialogDescription>
               Cette action est irréversible. L'infrastructure "{deletingInfra?.name}" sera supprimée.
-              {runners?.some(r => r.infrastructure_id === deletingInfra?.id) && (
+              {getRunnerCountForInfra(deletingInfra?.id || '') > 0 && (
                 <span className="block mt-2 text-amber-500">
                   ⚠️ Les runners associés seront automatiquement dissociés.
                 </span>
