@@ -12,8 +12,8 @@ const SETTING_API_BASE_URL = 'orders_api_base_url';
 const SETTING_API_V1_URL = 'orders_api_v1_url';
 
 // Default values (fallback if no setting exists)
-const DEFAULT_API_BASE_URL = 'https://automate.ikomadigit.com';
-const DEFAULT_API_V1_URL = 'https://automate.ikomadigit.com/v1';
+const DEFAULT_API_BASE_URL = 'https://api.ikomadigit.com';
+const DEFAULT_API_V1_URL = 'https://api.ikomadigit.com/v1';
 
 export function SettingsIntegrations() {
   const [showToken, setShowToken] = useState(false);

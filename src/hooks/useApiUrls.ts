@@ -10,14 +10,14 @@ const ENV_API_BASE_URL = import.meta.env.VITE_ORDERS_API_BASE_URL;
 const ENV_API_V1_URL = import.meta.env.VITE_ORDERS_API_V1_URL;
 
 // Default values (lowest priority)
-const DEFAULT_API_BASE_URL = 'https://automate.ikomadigit.com';
-const DEFAULT_API_V1_URL = 'https://automate.ikomadigit.com/v1';
+const DEFAULT_API_BASE_URL = 'https://api.ikomadigit.com';
+const DEFAULT_API_V1_URL = 'https://api.ikomadigit.com/v1';
 
 /**
  * Hook to get API URLs with priority:
  * 1. Environment variables (VITE_ORDERS_API_BASE_URL, VITE_ORDERS_API_V1_URL)
  * 2. Database settings (orders_api_base_url, orders_api_v1_url)
- * 3. Default values (https://automate.ikomadigit.com)
+ * 3. Default values (https://api.ikomadigit.com)
  */
 export function useApiUrls() {
   const { getSetting, isLoading } = useSettings();
