@@ -39,7 +39,8 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
-import { Infrastructure, useAssociateRunner } from '@/hooks/useInfrastructures';
+import { Infrastructure } from '@/hooks/useInfrastructures';
+import { useProxyAssociateRunner } from '@/hooks/useProxyRunners';
 import { useSettings } from '@/hooks/useSettings';
 import { useInstalledCapabilities, GROUP_DISPLAY } from '@/hooks/useInstalledCapabilities';
 import { ReinstallScript } from '@/components/runner/ReinstallScript';
@@ -304,7 +305,7 @@ function InstalledSoftware({ infrastructureId, runnerId }: { infrastructureId: s
 }
 
 export function InfraDetails({ infrastructure, runners, onBack, onEdit, onDelete }: InfraDetailsProps) {
-  const associateRunner = useAssociateRunner();
+  const associateRunner = useProxyAssociateRunner();
   const { getSetting } = useSettings();
   const [selectedRunner, setSelectedRunner] = useState<string>('');
   const [reinstallDialogOpen, setReinstallDialogOpen] = useState(false);

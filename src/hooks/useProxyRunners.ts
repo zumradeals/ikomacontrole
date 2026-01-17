@@ -181,3 +181,59 @@ export function useProxyResetToken() {
     },
   });
 }
+
+/**
+ * Associate/dissociate a runner with an infrastructure via the secure backend proxy
+ * Calls: admin-proxy -> PATCH /v1/runners/:id
+ */
+export function useProxyAssociateRunner() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ runnerId, infrastructureId }: { runnerId: string; infrastructureId: string | null }): Promise<void> => {
+      console.log('ASSOCIATE_RUNNER_REQUEST', { runnerId, infrastructureId });
+      
+      const { data, error } = await supabase.functions.invoke('admin-proxy', {
+        body: {
+          method: 'PATCH',
+          path: `/runners/${runnerId}`,
+          body: {
+            infrastructureId: infrastructureId,
+          },
+        },
+      });
+
+      console.log('ASSOCIATE_RUNNER_RESPONSE', { data, error });
+
+      if (error) {
+        console.error('ASSOCIATE_RUNNER_ERROR', error);
+        throw new Error(error.message || 'Failed to associate runner');
+      }
+
+      if (data?.error) {
+        console.error('ASSOCIATE_RUNNER_API_ERROR', data.error);
+        throw new Error(data.error);
+      }
+
+      console.log('ASSOCIATE_RUNNER_SUCCESS');
+    },
+    onSuccess: (_, { infrastructureId }) => {
+      queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });
+      queryClient.invalidateQueries({ queryKey: ['runners'] });
+      queryClient.invalidateQueries({ queryKey: ['infrastructures'] });
+      toast({
+        title: infrastructureId ? 'Agent associé' : 'Agent dissocié',
+        description: infrastructureId 
+          ? 'L\'agent a été associé au serveur.'
+          : 'L\'agent a été dissocié du serveur.',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Erreur',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+}
