@@ -73,24 +73,42 @@ serve(async (req) => {
 
     console.info(`Proxy response status: ${response.status}`);
 
+    // Handle non-2xx responses - return error directly without processing
+    if (!response.ok) {
+      console.error(`API error: ${response.status}`, responseData);
+      return new Response(
+        JSON.stringify({ 
+          error: responseData?.message || responseData?.error || `API returned ${response.status}`,
+          status: response.status 
+        }),
+        { 
+          status: response.status, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     // For GET /runners, normalize the response format
     if (path === '/runners' && method === 'GET') {
-      const runners = (responseData.runners || responseData || []).map((runner: Record<string, unknown>) => ({
-        id: runner.id,
-        name: runner.name,
-        status: runner.status,
-        lastHeartbeatAt: runner.last_seen_at || runner.lastHeartbeatAt,
-        infrastructureId: runner.infrastructure_id || runner.infrastructureId,
-        scopes: runner.scopes,
-        capabilities: runner.capabilities,
-        hostInfo: runner.host_info || runner.hostInfo,
-        createdAt: runner.created_at || runner.createdAt,
-      }));
+      const rawRunners = responseData?.runners || responseData;
+      const runners = Array.isArray(rawRunners) 
+        ? rawRunners.map((runner: Record<string, unknown>) => ({
+            id: runner.id,
+            name: runner.name,
+            status: runner.status,
+            lastHeartbeatAt: runner.last_seen_at || runner.lastHeartbeatAt,
+            infrastructureId: runner.infrastructure_id || runner.infrastructureId,
+            scopes: runner.scopes,
+            capabilities: runner.capabilities,
+            hostInfo: runner.host_info || runner.hostInfo,
+            createdAt: runner.created_at || runner.createdAt,
+          }))
+        : [];
       console.info(`Found ${runners.length} runners`);
       return new Response(
         JSON.stringify({ runners }),
         { 
-          status: response.status, 
+          status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       );
