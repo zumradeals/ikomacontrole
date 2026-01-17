@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
+import { useApiUrls } from '@/hooks/useApiUrls';
 
 type HealthStatus = 'checking' | 'online' | 'offline' | 'error';
 
@@ -13,6 +13,7 @@ interface HealthResult {
 }
 
 export function ApiHealthCheck() {
+  const { baseUrl } = useApiUrls();
   const [health, setHealth] = useState<HealthResult>({
     status: 'checking',
     message: 'Vérification en cours...',
@@ -24,37 +25,36 @@ export function ApiHealthCheck() {
     const startTime = Date.now();
 
     try {
-      // Use runner-proxy Edge Function instead of direct call to avoid CORS/Fetch issues
-      // We use a dummy runnerId/token for health check as it's usually public or doesn't require specific runner auth
-      const { data, error } = await supabase.functions.invoke('runner-proxy', {
-        body: {
-          method: 'GET',
-          path: '/health',
-          runnerId: 'health-check',
-          runnerToken: 'health-check',
-        },
+      // Direct call to public /health endpoint (no auth required, no proxy needed)
+      // Note: This may fail with CORS in browser if the API doesn't allow it
+      // In that case, we'll use the baseUrl from settings which should be accessible
+      const response = await fetch(`${baseUrl}/health`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
       });
 
       const latency = Date.now() - startTime;
 
-      if (error) {
+      if (!response.ok) {
         setHealth({
           status: 'offline',
-          message: error.message || 'Proxy unreachable',
+          message: `API erreur (HTTP ${response.status})`,
           latency,
         });
         return;
       }
 
-      // If we got data, the API is reachable through the proxy
+      const data = await response.json().catch(() => ({}));
+
       setHealth({
         status: 'online',
-        message: 'API joignable (via proxy)',
+        message: 'API joignable',
         latency,
         version: data?.version,
       });
     } catch (e) {
       const latency = Date.now() - startTime;
+      // CORS errors or network failures
       setHealth({
         status: 'offline',
         message: e instanceof Error ? e.message : 'Connexion impossible',
