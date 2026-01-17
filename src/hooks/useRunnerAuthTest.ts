@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useApiUrls } from './useApiUrls';
+import { supabase } from '@/integrations/supabase/client';
 
 // ============================================
 // Types
@@ -19,43 +19,56 @@ interface ClaimNextTestResult {
 }
 
 // ============================================
-// Hooks - Direct runner endpoints (no admin key needed)
+// Hooks - Via runner-proxy Edge Function (no direct browser calls)
 // ============================================
 
 /**
  * Test runner authentication via heartbeat
- * Calls: POST /v1/runner/heartbeat
- * Uses headers: x-runner-id, x-runner-token
+ * Uses: runner-proxy Edge Function → POST /v1/runner/heartbeat
  */
 export function useTestRunnerAuth() {
-  const { v1Url } = useApiUrls();
-
   return useMutation({
     mutationFn: async ({ runnerId, token }: { runnerId: string; token: string }): Promise<HeartbeatTestResult> => {
-      // Use Authorization: Bearer token for runner auth (no admin key, no x-runner-* headers)
-      const response = await fetch(`${v1Url}/runner/heartbeat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+      console.log('RUNNER_AUTH_TEST_REQUEST', { runnerId: runnerId.slice(0, 8) + '...' });
+
+      const { data, error } = await supabase.functions.invoke('runner-proxy', {
+        body: {
+          method: 'POST',
+          path: '/runner/heartbeat',
+          runnerId,
+          runnerToken: token,
+          body: {},
         },
-        body: JSON.stringify({ runner_id: runnerId }),
       });
 
-      const data = await response.json().catch(() => ({}));
+      console.log('RUNNER_AUTH_TEST_RESPONSE', { 
+        status: error ? 'error' : 'success', 
+        error: error?.message,
+        data 
+      });
 
-      if (response.ok && data.ok === true) {
+      if (error) {
         return {
-          success: true,
-          message: 'Authentification réussie',
-          status: response.status,
+          success: false,
+          message: error.message || 'Erreur de connexion au proxy',
+          status: 500,
         };
       }
 
+      // Check if the backend returned success
+      if (data?.ok === true) {
+        return {
+          success: true,
+          message: 'Authentification réussie',
+          status: 200,
+        };
+      }
+
+      // Handle error responses from the backend
       return {
         success: false,
-        message: data.message || data.error || `HTTP ${response.status}`,
-        status: response.status,
+        message: data?.message || data?.error || 'Erreur d\'authentification',
+        status: data?.status || 401,
       };
     },
   });
@@ -63,25 +76,49 @@ export function useTestRunnerAuth() {
 
 /**
  * Test claim-next endpoint
- * Calls: POST /v1/runner/orders/claim-next
- * Uses headers: x-runner-id, x-runner-token
+ * Uses: runner-proxy Edge Function → POST /v1/runner/orders/claim-next
  */
 export function useTestClaimNext() {
-  const { v1Url } = useApiUrls();
-
   return useMutation({
     mutationFn: async ({ runnerId, token }: { runnerId: string; token: string }): Promise<ClaimNextTestResult> => {
-      // Use Authorization: Bearer token for runner auth
-      const response = await fetch(`${v1Url}/runner/orders/claim-next`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
+      console.log('RUNNER_CLAIM_NEXT_REQUEST', { runnerId: runnerId.slice(0, 8) + '...' });
+
+      const { data, error } = await supabase.functions.invoke('runner-proxy', {
+        body: {
+          method: 'POST',
+          path: '/runner/orders/claim-next',
+          runnerId,
+          runnerToken: token,
+          body: {},
         },
-        body: JSON.stringify({ runner_id: runnerId }),
       });
 
-      if (response.status === 204) {
+      console.log('RUNNER_CLAIM_NEXT_RESPONSE', { 
+        status: error ? 'error' : 'success', 
+        error: error?.message,
+        data 
+      });
+
+      if (error) {
+        // Check if it's a 204 (no content) which means no orders available
+        if (error.message?.includes('204')) {
+          return {
+            success: true,
+            hasOrder: false,
+            message: 'Aucun ordre en attente',
+            status: 204,
+          };
+        }
+        return {
+          success: false,
+          hasOrder: false,
+          message: error.message || 'Erreur de connexion au proxy',
+          status: 500,
+        };
+      }
+
+      // Empty response or null data means 204 No Content
+      if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
         return {
           success: true,
           hasOrder: false,
@@ -90,21 +127,12 @@ export function useTestClaimNext() {
         };
       }
 
-      if (response.ok) {
-        return {
-          success: true,
-          hasOrder: true,
-          message: 'Ordre récupéré',
-          status: response.status,
-        };
-      }
-
-      const data = await response.json().catch(() => ({}));
+      // If we got data, there's an order
       return {
-        success: false,
-        hasOrder: false,
-        message: data.message || data.error || `HTTP ${response.status}`,
-        status: response.status,
+        success: true,
+        hasOrder: true,
+        message: 'Ordre récupéré',
+        status: 200,
       };
     },
   });
