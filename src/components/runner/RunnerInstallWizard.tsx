@@ -52,7 +52,7 @@ export function RunnerInstallWizard() {
   // Create runner dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newRunnerName, setNewRunnerName] = useState('');
-  const [selectedInfraId, setSelectedInfraId] = useState<string>('');
+  const [selectedInfraId, setSelectedInfraId] = useState<string>('none');
 
   // Hooks - Using secure proxy (no admin key in frontend)
   const { baseUrl, installScriptUrl, validateInstallUrl } = useApiUrls();
@@ -118,7 +118,7 @@ export function RunnerInstallWizard() {
     try {
       const result = await createRunner.mutateAsync({
         name: newRunnerName.trim(),
-        infrastructureId: selectedInfraId || undefined,
+        infrastructureId: selectedInfraId !== 'none' ? selectedInfraId : undefined,
       });
       
       // Auto-select the new runner and set token
@@ -132,7 +132,7 @@ export function RunnerInstallWizard() {
       // Reset dialog state
       setCreateDialogOpen(false);
       setNewRunnerName('');
-      setSelectedInfraId('');
+      setSelectedInfraId('none');
       
       // Refresh runners list
       refetchRunners();
@@ -343,7 +343,7 @@ export function RunnerInstallWizard() {
                         <SelectValue placeholder="Aucune infrastructure" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Aucune</SelectItem>
+                        <SelectItem value="none">Aucune</SelectItem>
                         {infrastructures?.map((infra) => (
                           <SelectItem key={infra.id} value={infra.id}>
                             {infra.name}

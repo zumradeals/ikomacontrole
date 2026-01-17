@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { checkApiHealth, ORDERS_API_BASE_URL } from '@/lib/api-client';
+import { useApiUrls } from '@/hooks/useApiUrls';
 
 type HealthStatus = 'checking' | 'online' | 'offline' | 'error';
 
@@ -13,80 +13,92 @@ interface HealthResult {
 }
 
 export function ApiHealthCheck() {
-  const [health, setHealth] = useState<HealthResult>({ 
-    status: 'checking', 
-    message: 'Vérification en cours...' 
+  const { baseUrl, isLoading: urlsLoading } = useApiUrls();
+
+  const [health, setHealth] = useState<HealthResult>({
+    status: 'checking',
+    message: 'Vérification en cours...',
   });
 
   const performHealthCheck = async () => {
+    if (!baseUrl) {
+      setHealth({ status: 'error', message: "URL API non configurée" });
+      return;
+    }
+
     setHealth({ status: 'checking', message: 'Vérification en cours...' });
-    
-    const result = await checkApiHealth();
-    
-    if (result.status === 'online') {
-      setHealth({ 
-        status: 'online', 
-        message: 'API joignable',
-        latency: result.latency,
-        version: result.version
+
+    const startTime = Date.now();
+
+    try {
+      const response = await fetch(`${baseUrl}/health`, { method: 'GET' });
+      const latency = Date.now() - startTime;
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok) {
+        setHealth({
+          status: 'online',
+          message: 'API joignable',
+          latency,
+          version: data.version,
+        });
+        return;
+      }
+
+      setHealth({
+        status: 'error',
+        message: data.message || data.error || `HTTP ${response.status}`,
+        latency,
       });
-    } else if (result.status === 'offline') {
-      setHealth({ 
-        status: 'offline', 
-        message: result.message || 'Connexion impossible',
-        latency: result.latency
-      });
-    } else {
-      setHealth({ 
-        status: 'error', 
-        message: result.message || 'Erreur',
-        latency: result.latency
+    } catch (e) {
+      const latency = Date.now() - startTime;
+      setHealth({
+        status: 'offline',
+        message: e instanceof Error ? e.message : 'Connexion impossible',
+        latency,
       });
     }
   };
 
   useEffect(() => {
     performHealthCheck();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseUrl]);
 
   const statusColors = {
     checking: 'text-muted-foreground',
     online: 'text-green-500',
     offline: 'text-red-500',
-    error: 'text-orange-500'
+    error: 'text-orange-500',
   };
 
   const StatusIcon = {
     checking: Loader2,
     online: CheckCircle,
     offline: XCircle,
-    error: XCircle
+    error: XCircle,
   }[health.status];
 
   return (
     <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/50">
       <div className="flex items-center gap-3">
-        <StatusIcon 
-          className={`w-5 h-5 ${statusColors[health.status]} ${health.status === 'checking' ? 'animate-spin' : ''}`} 
+        <StatusIcon
+          className={`w-5 h-5 ${statusColors[health.status]} ${health.status === 'checking' ? 'animate-spin' : ''}`}
         />
         <div>
-          <p className={`text-sm font-medium ${statusColors[health.status]}`}>
-            {health.message}
-          </p>
+          <p className={`text-sm font-medium ${statusColors[health.status]}`}>{health.message}</p>
           <p className="text-xs text-muted-foreground">
-            {ORDERS_API_BASE_URL}
-            {health.latency !== undefined && health.status !== 'checking' && (
-              <> • Latence: {health.latency}ms</>
-            )}
+            {baseUrl || '—'}
+            {health.latency !== undefined && health.status !== 'checking' && <> • Latence: {health.latency}ms</>}
             {health.version && ` • v${health.version}`}
           </p>
         </div>
       </div>
-      <Button 
-        variant="ghost" 
-        size="sm" 
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={performHealthCheck}
-        disabled={health.status === 'checking'}
+        disabled={urlsLoading || health.status === 'checking'}
       >
         <RefreshCw className={`w-4 h-4 ${health.status === 'checking' ? 'animate-spin' : ''}`} />
       </Button>
