@@ -33,50 +33,42 @@ interface ResetTokenResult {
 }
 
 // ============================================
-// Edge Function URL helper
-// ============================================
-
-const getProxyUrl = () => {
-  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'lqocccsxzqnbcwshseom';
-  return `https://${projectId}.supabase.co/functions/v1/admin-proxy`;
-};
-
-// ============================================
-// Hooks
+// Hooks using supabase.functions.invoke
 // ============================================
 
 /**
  * Fetch runners via the secure backend proxy
- * Calls: GET /admin-proxy/runners
+ * Calls: admin-proxy -> GET /v1/runners
  */
 export function useProxyRunners() {
   return useQuery({
     queryKey: ['proxy-runners'],
     queryFn: async (): Promise<ProxyRunner[]> => {
-      const url = `${getProxyUrl()}/runners`;
-      console.log('FETCH_RUNNERS_REQUEST', url);
+      console.log('FETCH_RUNNERS_REQUEST via admin-proxy');
       
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
+      const { data, error } = await supabase.functions.invoke('admin-proxy', {
+        body: {
+          method: 'GET',
+          path: '/runners',
         },
       });
 
-      console.log('FETCH_RUNNERS_RESPONSE', response.status);
+      console.log('FETCH_RUNNERS_RESPONSE', { data, error });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('FETCH_RUNNERS_ERROR', errorData);
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+      if (error) {
+        console.error('FETCH_RUNNERS_ERROR', error);
+        throw new Error(error.message || 'Failed to fetch runners');
       }
 
-      const data = await response.json();
-      console.log('FETCH_RUNNERS_SUCCESS', { count: data.runners?.length ?? 0 });
-      return data.runners || [];
+      // Handle API error response
+      if (data?.error) {
+        console.error('FETCH_RUNNERS_API_ERROR', data.error);
+        throw new Error(data.error);
+      }
+
+      const runners = data?.runners || data || [];
+      console.log('FETCH_RUNNERS_SUCCESS', { count: Array.isArray(runners) ? runners.length : 0 });
+      return Array.isArray(runners) ? runners : [];
     },
     refetchInterval: 15000,
     staleTime: 10000,
@@ -85,7 +77,7 @@ export function useProxyRunners() {
 
 /**
  * Create a new runner via the secure backend proxy
- * Calls: POST /admin-proxy/runners
+ * Calls: admin-proxy -> POST /v1/runners
  * Returns the runner ID and initial clear token
  */
 export function useProxyCreateRunner() {
@@ -95,32 +87,29 @@ export function useProxyCreateRunner() {
     mutationFn: async ({ name, infrastructureId }: { name: string; infrastructureId?: string }): Promise<CreateRunnerResult> => {
       console.log('CREATE_RUNNER_REQUEST', { name, infrastructureId });
       
-      const { data: { session } } = await supabase.auth.getSession();
-      const url = `${getProxyUrl()}/runners`;
-      
-      console.log('CREATE_RUNNER_URL', url);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
+      const { data, error } = await supabase.functions.invoke('admin-proxy', {
+        body: {
+          method: 'POST',
+          path: '/runners',
+          body: {
+            name,
+            infrastructureId: infrastructureId || null,
+          },
         },
-        body: JSON.stringify({
-          name,
-          infrastructureId: infrastructureId || null,
-        }),
       });
 
-      console.log('CREATE_RUNNER_RESPONSE', response.status);
+      console.log('CREATE_RUNNER_RESPONSE', { data, error });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('CREATE_RUNNER_ERROR', errorData);
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+      if (error) {
+        console.error('CREATE_RUNNER_ERROR', error);
+        throw new Error(error.message || 'Failed to create runner');
       }
 
-      const data = await response.json();
+      if (data?.error) {
+        console.error('CREATE_RUNNER_API_ERROR', data.error);
+        throw new Error(data.error);
+      }
+
       console.log('CREATE_RUNNER_SUCCESS', { id: data.id, name: data.name, hasToken: !!data.token });
       return data;
     },
@@ -144,7 +133,7 @@ export function useProxyCreateRunner() {
 
 /**
  * Reset token for a runner via the secure backend proxy
- * Calls: POST /admin-proxy/runners/:id/token/reset
+ * Calls: admin-proxy -> POST /v1/runners/:id/token/reset
  */
 export function useProxyResetToken() {
   const queryClient = useQueryClient();
@@ -153,32 +142,26 @@ export function useProxyResetToken() {
     mutationFn: async (runnerId: string): Promise<ResetTokenResult> => {
       console.log('TOKEN_RESET_REQUEST', runnerId);
       
-      const { data: { session } } = await supabase.auth.getSession();
-      const url = `${getProxyUrl()}/runners/${runnerId}/token/reset`;
-      
-      console.log('TOKEN_RESET_URL', url);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
+      const { data, error } = await supabase.functions.invoke('admin-proxy', {
+        body: {
+          method: 'POST',
+          path: `/runners/${runnerId}/token/reset`,
+          body: {}, // Empty body required by Fastify
         },
-        body: JSON.stringify({}), // Required: non-empty body for Fastify
       });
 
-      console.log('TOKEN_RESET_RESPONSE', response.status);
+      console.log('TOKEN_RESET_RESPONSE', { data, error });
 
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('Endpoint token/reset non implémenté côté serveur');
-        }
-        const errorData = await response.json().catch(() => ({}));
-        console.error('TOKEN_RESET_ERROR', errorData);
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+      if (error) {
+        console.error('TOKEN_RESET_ERROR', error);
+        throw new Error(error.message || 'Failed to reset token');
       }
 
-      const data = await response.json();
+      if (data?.error) {
+        console.error('TOKEN_RESET_API_ERROR', data.error);
+        throw new Error(data.error);
+      }
+
       console.log('TOKEN_RESET_SUCCESS', { hasToken: !!data.token });
       return data;
     },
