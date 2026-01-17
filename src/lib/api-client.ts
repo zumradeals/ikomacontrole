@@ -8,8 +8,8 @@
  */
 
 // Environment-based URLs with fallbacks
-const API_BASE_URL = import.meta.env.VITE_ORDERS_API_BASE_URL || 'https://automate.ikomadigit.com';
-const API_V1_URL = import.meta.env.VITE_ORDERS_API_V1_URL || 'https://automate.ikomadigit.com/v1';
+const API_BASE_URL = import.meta.env.VITE_ORDERS_API_BASE_URL || 'https://api.ikomadigit.com';
+const API_V1_URL = import.meta.env.VITE_ORDERS_API_V1_URL || 'https://api.ikomadigit.com/v1';
 
 export interface ApiClientOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
