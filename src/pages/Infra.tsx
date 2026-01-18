@@ -17,6 +17,7 @@ import {
 import { InfraCard } from '@/components/infra/InfraCard';
 import { InfraForm } from '@/components/infra/InfraForm';
 import { InfraDetails } from '@/components/infra/InfraDetails';
+import { ApiContractStatus } from '@/components/infra/ApiContractStatus';
 import {
   useInfrastructures,
   useCreateInfrastructure,
@@ -174,6 +175,9 @@ const Infra = () => {
           <strong>Module Serveurs :</strong> Déclarez vos serveurs et leurs capacités. IKOMA ne crée rien — il observe et valide.
         </AlertDescription>
       </Alert>
+
+      {/* API Contract Diagnostic */}
+      <ApiContractStatus />
 
       {/* Infrastructures Header */}
       <div className="flex items-center justify-between">

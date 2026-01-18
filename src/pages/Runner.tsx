@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { RunnersTable } from '@/components/runner/RunnersTable';
 import { RunnerInstallWizard } from '@/components/runner/RunnerInstallWizard';
+import { ApiContractStatus } from '@/components/infra/ApiContractStatus';
 // useRunners now uses admin-proxy internally (no more direct Supabase)
 import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
@@ -44,6 +45,9 @@ const Runner = () => {
         </div>
         <ApiHealthCheck />
       </div>
+
+      {/* API Contract Diagnostic */}
+      <ApiContractStatus />
 
       {/* Runners Table */}
       {(hasRunners || runnersLoading) && (
