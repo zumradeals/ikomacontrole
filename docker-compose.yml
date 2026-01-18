@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: ikoma-frontend
+    restart: always
+
+  bff:
+    build:
+      context: ./bff
+    container_name: ikoma-bff
+    restart: always
+    environment:
+      - IKOMA_ORDERS_BASE_URL=${IKOMA_ORDERS_BASE_URL}
+      - IKOMA_ADMIN_KEY=${IKOMA_ADMIN_KEY}
+      - AUTH_MODE=${AUTH_MODE}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+    ports:
+      - "3000:3000"
+
+networks:
+  default:
+    name: ikoma-network
