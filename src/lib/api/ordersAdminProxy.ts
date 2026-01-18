@@ -350,15 +350,13 @@ export async function deleteRunner(runnerId: string): Promise<ApiResponse<void>>
 // ============================================
 
 export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
-  // Try /servers first, fallback to local infra
   const response = await adminProxy<{ servers?: RawServer[] } | RawServer[]>({
     method: 'GET',
     path: '/servers',
   });
 
   if (!response.success) {
-    // API might not have /servers endpoint - this is OK, we use local Supabase
-    console.log('[ordersAdminProxy] /servers not available, using local data');
+    console.log('[ordersAdminProxy] /servers endpoint error:', response.error);
     return { success: false, error: response.error, statusCode: response.statusCode };
   }
 
@@ -390,6 +388,69 @@ export async function getServer(serverId: string): Promise<ApiResponse<ProxyServ
     success: true,
     data: mapServer(response.data),
   };
+}
+
+/**
+ * Create a new server via POST /servers.
+ */
+export async function createServer(
+  name: string,
+  baseUrl?: string,
+  runnerId?: string | null
+): Promise<ApiResponse<ProxyServer>> {
+  const body: Record<string, unknown> = { name };
+  if (baseUrl) body.baseUrl = baseUrl;
+  if (runnerId) body.runnerId = runnerId;
+
+  const response = await adminProxy<RawServer>({
+    method: 'POST',
+    path: '/servers',
+    body,
+  });
+
+  if (!response.success || !response.data) {
+    return { success: false, error: response.error, statusCode: response.statusCode };
+  }
+
+  return {
+    success: true,
+    data: mapServer(response.data),
+  };
+}
+
+/**
+ * Update server runner association via PATCH /servers/:id.
+ * Body: { runnerId: "<id>" | null }
+ */
+export async function updateServerRunner(
+  serverId: string,
+  runnerId: string | null
+): Promise<ApiResponse<ProxyServer>> {
+  const response = await adminProxy<RawServer>({
+    method: 'PATCH',
+    path: `/servers/${serverId}`,
+    body: { runnerId },
+  });
+
+  if (!response.success) {
+    return { success: false, error: response.error, statusCode: response.statusCode };
+  }
+
+  if (response.data) {
+    return { success: true, data: mapServer(response.data) };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Delete a server via DELETE /servers/:id.
+ */
+export async function deleteServer(serverId: string): Promise<ApiResponse<void>> {
+  return adminProxy<void>({
+    method: 'DELETE',
+    path: `/servers/${serverId}`,
+  });
 }
 
 // ============================================

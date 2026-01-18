@@ -166,6 +166,98 @@ serve(async (req) => {
       );
     }
 
+    // For GET /servers, normalize the response format
+    if (path === '/servers' && httpMethod === 'GET') {
+      const rawServers = responseData?.servers || responseData;
+      const servers = Array.isArray(rawServers) 
+        ? rawServers.map((server: Record<string, unknown>) => ({
+            id: server.id,
+            name: server.name,
+            host: server.host,
+            ip: server.ip,
+            baseUrl: server.base_url || server.baseUrl,
+            runnerId: server.runner_id || server.runnerId || (server.runner as Record<string, unknown>)?.id,
+            runnerName: (server.runner as Record<string, unknown>)?.name,
+            runnerStatus: (server.runner as Record<string, unknown>)?.status,
+            status: server.status,
+            createdAt: server.created_at || server.createdAt,
+            updatedAt: server.updated_at || server.updatedAt,
+          }))
+        : [];
+      console.info(`Found ${servers.length} servers`);
+      return new Response(
+        JSON.stringify({ servers }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    // For GET /servers/:id, normalize single server response
+    if (path.match(/^\/servers\/[^/]+$/) && httpMethod === 'GET') {
+      const server = responseData?.server || responseData;
+      if (server && typeof server === 'object') {
+        const normalizedServer = {
+          id: server.id,
+          name: server.name,
+          host: server.host,
+          ip: server.ip,
+          baseUrl: server.base_url || server.baseUrl,
+          runnerId: server.runner_id || server.runnerId || (server.runner as Record<string, unknown>)?.id,
+          runnerName: (server.runner as Record<string, unknown>)?.name,
+          runnerStatus: (server.runner as Record<string, unknown>)?.status,
+          status: server.status,
+          createdAt: server.created_at || server.createdAt,
+          updatedAt: server.updated_at || server.updatedAt,
+        };
+        return new Response(
+          JSON.stringify(normalizedServer),
+          { 
+            status: 200, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        );
+      }
+    }
+
+    // For POST /servers, return created server
+    if (path === '/servers' && httpMethod === 'POST') {
+      console.info('POST server response:', responseData);
+      const server = responseData?.server || responseData;
+      return new Response(
+        JSON.stringify(server),
+        { 
+          status: 201, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    // For PATCH /servers/:id, return the updated server
+    if (path.match(/^\/servers\/[^/]+$/) && httpMethod === 'PATCH') {
+      console.info('PATCH server response:', responseData);
+      return new Response(
+        JSON.stringify(responseData || { success: true }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    // For DELETE /servers/:id
+    if (path.match(/^\/servers\/[^/]+$/) && httpMethod === 'DELETE') {
+      console.info('DELETE server response:', responseData);
+      return new Response(
+        JSON.stringify(responseData || { success: true }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     return new Response(
       JSON.stringify(responseData),
       { 
