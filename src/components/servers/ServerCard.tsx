@@ -29,9 +29,13 @@ export function ServerCard({
   onDelete,
   isUpdating,
 }: ServerCardProps) {
-  const hasRunner = !!server.runnerId;
+  const hasRunnerId = !!server.runnerId;
+  
+  // Resolve runner name/status from runners list, fallback to server fields or raw ID
+  const resolvedRunnerName = runner?.name || server.runnerName || null;
+  const resolvedRunnerStatus = runner?.status || server.runnerStatus || null;
 
-  // Sort runners: ONLINE first, then by name
+  // Sort runners: ONLINE first, then by name (show ALL runners, never filter OFFLINE)
   const sortedRunners = [...runners].sort((a, b) => {
     if (a.status === 'ONLINE' && b.status !== 'ONLINE') return -1;
     if (a.status !== 'ONLINE' && b.status === 'ONLINE') return 1;
@@ -75,15 +79,15 @@ export function ServerCard({
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Status */}
-        <div className="flex items-center gap-2">
+        {/* Association Status - based on server.runnerId */}
+        <div className="flex items-center gap-2 flex-wrap">
           <Badge 
-            variant={hasRunner ? 'default' : 'secondary'}
+            variant={hasRunnerId ? 'default' : 'secondary'}
             className={cn(
-              hasRunner && 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+              hasRunnerId && 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
             )}
           >
-            {hasRunner ? (
+            {hasRunnerId ? (
               <>
                 <Link2 className="w-3 h-3 mr-1" />
                 Associé
@@ -96,32 +100,37 @@ export function ServerCard({
             )}
           </Badge>
 
-          {runner && (
+          {/* Show runner status if resolved */}
+          {hasRunnerId && resolvedRunnerStatus && (
             <Badge 
               variant="outline"
               className={cn(
-                runner.status === 'ONLINE' && 'border-emerald-500/30 text-emerald-500',
-                runner.status === 'OFFLINE' && 'border-muted-foreground/30 text-muted-foreground'
+                resolvedRunnerStatus === 'ONLINE' && 'border-emerald-500/30 text-emerald-500',
+                resolvedRunnerStatus === 'OFFLINE' && 'border-muted-foreground/30 text-muted-foreground'
               )}
             >
               <Activity className={cn(
                 'w-3 h-3 mr-1',
-                runner.status === 'ONLINE' && 'animate-pulse'
+                resolvedRunnerStatus === 'ONLINE' && 'animate-pulse'
               )} />
-              {runner.status}
+              {resolvedRunnerStatus}
             </Badge>
           )}
         </div>
 
-        {/* Runner info */}
-        {runner && (
+        {/* Runner info - show resolved name or raw ID */}
+        {hasRunnerId && (
           <div className="text-sm">
             <span className="text-muted-foreground">Runner: </span>
-            <span className="font-medium">{runner.name}</span>
+            <span className="font-medium">
+              {resolvedRunnerName || (
+                <span className="font-mono text-xs opacity-70">{server.runnerId}</span>
+              )}
+            </span>
           </div>
         )}
 
-        {/* Runner Select */}
+        {/* Runner Select - shows ALL runners (never filter OFFLINE) */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground">
             Runner associé
@@ -156,10 +165,19 @@ export function ServerCard({
           </Select>
         </div>
 
-        {/* Server ID (debug) */}
-        <div className="pt-2 border-t border-border/50">
-          <p className="text-xs text-muted-foreground font-mono truncate">
-            ID: {server.id}
+        {/* Debug line: serverId / runnerId / runnerNameResolved / runnerStatusResolved */}
+        <div className="pt-2 border-t border-border/50 space-y-0.5">
+          <p className="text-[10px] text-muted-foreground font-mono">
+            <span className="opacity-60">serverId:</span> {server.id}
+          </p>
+          <p className="text-[10px] text-muted-foreground font-mono">
+            <span className="opacity-60">runnerId:</span> {server.runnerId || '—'}
+          </p>
+          <p className="text-[10px] text-muted-foreground font-mono">
+            <span className="opacity-60">runnerName:</span> {resolvedRunnerName || '—'}
+          </p>
+          <p className="text-[10px] text-muted-foreground font-mono">
+            <span className="opacity-60">runnerStatus:</span> {resolvedRunnerStatus || '—'}
           </p>
         </div>
       </CardContent>
