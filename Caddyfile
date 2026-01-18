@@ -1,0 +1,15 @@
+runner.ikomadigit.com {
+    # Frontend static files
+    root * /usr/share/nginx/html
+    file_server
+
+    # BFF API
+    handle /api/* {
+        reverse_proxy bff:3000
+    }
+
+    # Fallback to index.html for SPA routing
+    handle {
+        try_files {path} /index.html
+    }
+}
