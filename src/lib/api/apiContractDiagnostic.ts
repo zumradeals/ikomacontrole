@@ -7,7 +7,6 @@
 
 import { 
   listRunners, 
-  getRunner, 
   listServers,
   getProxyLogs,
   type ProxyRunner,
@@ -67,8 +66,8 @@ const REQUIRED_ENDPOINTS: Omit<ApiEndpointStatus, 'status' | 'lastTestedAt' | 'e
   {
     endpoint: '/runners/:id',
     method: 'GET',
-    description: 'Récupère un runner par ID',
-    required: true,
+    description: 'Récupère un runner par ID (non supporté - utiliser liste)',
+    required: false, // NOT supported by IKOMA API - use list-based resolution
   },
   {
     endpoint: '/runners',
@@ -210,34 +209,14 @@ export async function runApiContractDiagnostic(): Promise<ApiContractDiagnostic>
     });
   }
 
-  // Test GET /runners/:id (if we have a sample runner)
-  if (sampleRunner) {
-    try {
-      const singleRunnerResult = await getRunner(sampleRunner.id);
-      endpoints.push({
-        ...REQUIRED_ENDPOINTS[1],
-        status: singleRunnerResult.success ? 'available' : 
-                singleRunnerResult.statusCode === 404 ? 'missing' : 'error',
-        lastTestedAt: new Date(),
-        errorMessage: singleRunnerResult.success ? undefined : 
-                      singleRunnerResult.statusCode === 404 ? 'Endpoint non implémenté (404)' : singleRunnerResult.error,
-      });
-    } catch (err) {
-      console.error('[ApiContractDiagnostic] GET /runners/:id failed:', err);
-      endpoints.push({
-        ...REQUIRED_ENDPOINTS[1],
-        status: 'missing',
-        lastTestedAt: new Date(),
-        errorMessage: 'Endpoint non disponible',
-      });
-    }
-  } else {
-    endpoints.push({
-      ...REQUIRED_ENDPOINTS[1],
-      status: 'untested',
-      lastTestedAt: new Date(),
-    });
-  }
+  // Skip GET /runners/:id - NOT supported by IKOMA API (always returns 404)
+  // Mark as intentionally skipped, not as an error
+  endpoints.push({
+    ...REQUIRED_ENDPOINTS[1],
+    status: 'missing',
+    lastTestedAt: new Date(),
+    errorMessage: 'Endpoint non supporté par l\'API IKOMA - résolution via liste',
+  });
 
   // Test GET /servers
   try {
@@ -395,7 +374,8 @@ export async function runApiContractDiagnostic(): Promise<ApiContractDiagnostic>
 }
 
 /**
- * Check if a specific runner association is verifiable via API
+ * Check if a specific runner association is verifiable via API.
+ * Uses list-based resolution only (GET /runners/:id not supported by IKOMA API).
  */
 export async function checkRunnerAssociationVerifiable(
   runnerId: string,
@@ -403,32 +383,9 @@ export async function checkRunnerAssociationVerifiable(
 ): Promise<{
   verifiable: boolean;
   confirmed: boolean;
-  method: 'runner-field' | 'server-field' | 'get-runner' | 'none';
+  method: 'runner-field' | 'server-field' | 'none';
   message: string;
 }> {
-  try {
-    // Try to get the runner directly
-    const runnerResult = await getRunner(runnerId);
-    
-    if (runnerResult.success && runnerResult.data) {
-      const runner = runnerResult.data;
-      const actualInfraId = runner.infrastructureId || runner.serverId;
-      
-      if (actualInfraId) {
-        return {
-          verifiable: true,
-          confirmed: actualInfraId === expectedInfraId,
-          method: 'get-runner',
-          message: actualInfraId === expectedInfraId 
-            ? 'Association confirmée via GET /runners/:id'
-            : `Association différente: attendu ${expectedInfraId}, reçu ${actualInfraId}`,
-        };
-      }
-    }
-    // If getRunner returned 404, continue to next method silently
-  } catch {
-    // GET /runners/:id not available, continue to fallback methods
-  }
 
   try {
     // Try from list of runners
