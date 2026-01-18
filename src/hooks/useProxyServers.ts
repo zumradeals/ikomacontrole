@@ -62,6 +62,8 @@ export function useProxyRunnersV2() {
 
 /**
  * Fetch a single runner by ID.
+ * NOTE: GET /runners/:id may not be supported by the API (returns 404).
+ * This hook handles 404 gracefully by returning null.
  */
 export function useProxyRunnerV2(runnerId: string | null) {
   return useQuery({
@@ -69,12 +71,22 @@ export function useProxyRunnerV2(runnerId: string | null) {
     queryFn: async (): Promise<ProxyRunner | null> => {
       if (!runnerId) return null;
       const result = await getRunner(runnerId);
+      // Handle 404 gracefully - endpoint may not exist
       if (!result.success) {
+        if (result.statusCode === 404) {
+          console.log(`[useProxyRunnerV2] GET /runners/${runnerId} returned 404 - endpoint not supported`);
+          return null;
+        }
         throw new Error(result.error || 'Failed to fetch runner');
       }
       return result.data || null;
     },
     enabled: !!runnerId,
+    retry: (failureCount, error) => {
+      // Don't retry on 404
+      if (error instanceof Error && error.message.includes('404')) return false;
+      return failureCount < 2;
+    },
   });
 }
 
