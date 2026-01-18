@@ -10,6 +10,7 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Runner from "./pages/Runner";
 import Infra from "./pages/Infra";
+import Servers from "./pages/Servers";
 import Playbooks from "./pages/Playbooks";
 import SupabaseSetup from "./pages/SupabaseSetup";
 import Deployer from "./pages/Deployer";
@@ -39,6 +40,7 @@ const App = () => (
                       <Route path="/" element={<Index />} />
                       <Route path="/runner" element={<Runner />} />
                       <Route path="/infra" element={<Infra />} />
+                      <Route path="/servers" element={<Servers />} />
                       <Route path="/platform" element={<Playbooks />} />
                       <Route path="/platform/supabase" element={<SupabaseSetup />} />
                       <Route path="/deployer" element={<Deployer />} />
