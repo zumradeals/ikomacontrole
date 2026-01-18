@@ -121,16 +121,37 @@ async function adminProxy<T = unknown>(request: ProxyRequest): Promise<ApiRespon
     const duration = Date.now() - startTime;
 
     if (error) {
-      console.error(`[ordersAdminProxy] Error:`, error);
+      // Try to extract response body from FunctionsHttpError for status code
+      let statusCode: number | undefined;
+      let errorMessage = error.message;
+      
+      // Check if error has context with response data
+      if ('context' in error && error.context) {
+        try {
+          // FunctionsHttpError stores response in context
+          const ctx = error.context as { status?: number; body?: string };
+          statusCode = ctx.status;
+          if (ctx.body) {
+            const parsed = JSON.parse(ctx.body);
+            errorMessage = parsed.error || parsed.message || errorMessage;
+            statusCode = parsed.status || statusCode;
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+      
+      console.error(`[ordersAdminProxy] Error (${statusCode || 'unknown'}):`, errorMessage);
       addLog({
         action: logAction,
         endpoint: request.path,
         method: request.method,
+        statusCode,
         success: false,
-        error: error.message,
+        error: errorMessage,
         duration,
       });
-      return { success: false, error: error.message };
+      return { success: false, error: errorMessage, statusCode };
     }
 
     if (data?.error) {
@@ -159,18 +180,26 @@ async function adminProxy<T = unknown>(request: ProxyRequest): Promise<ApiRespon
     return { success: true, data: data as T, statusCode: 200 };
   } catch (err) {
     const duration = Date.now() - startTime;
-    const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+    let errorMsg = err instanceof Error ? err.message : 'Unknown error';
+    let statusCode: number | undefined;
+    
+    // Try to extract status from error message pattern "returned 404"
+    const statusMatch = errorMsg.match(/returned?\s*(\d{3})/i);
+    if (statusMatch) {
+      statusCode = parseInt(statusMatch[1], 10);
+    }
     
     addLog({
       action: logAction,
       endpoint: request.path,
       method: request.method,
+      statusCode,
       success: false,
       error: errorMsg,
       duration,
     });
 
-    return { success: false, error: errorMsg };
+    return { success: false, error: errorMsg, statusCode };
   }
 }
 

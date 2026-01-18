@@ -406,58 +406,71 @@ export async function checkRunnerAssociationVerifiable(
   method: 'runner-field' | 'server-field' | 'get-runner' | 'none';
   message: string;
 }> {
-  // Try to get the runner directly
-  const runnerResult = await getRunner(runnerId);
-  
-  if (runnerResult.success && runnerResult.data) {
-    const runner = runnerResult.data;
-    const actualInfraId = runner.infrastructureId || runner.serverId;
+  try {
+    // Try to get the runner directly
+    const runnerResult = await getRunner(runnerId);
     
-    if (actualInfraId) {
-      return {
-        verifiable: true,
-        confirmed: actualInfraId === expectedInfraId,
-        method: 'get-runner',
-        message: actualInfraId === expectedInfraId 
-          ? 'Association confirmée via GET /runners/:id'
-          : `Association différente: attendu ${expectedInfraId}, reçu ${actualInfraId}`,
-      };
-    }
-  }
-
-  // Try from list of runners
-  const listResult = await listRunners();
-  if (listResult.success && listResult.data) {
-    const runner = listResult.data.find(r => r.id === runnerId);
-    if (runner) {
+    if (runnerResult.success && runnerResult.data) {
+      const runner = runnerResult.data;
       const actualInfraId = runner.infrastructureId || runner.serverId;
+      
       if (actualInfraId) {
         return {
           verifiable: true,
           confirmed: actualInfraId === expectedInfraId,
-          method: 'runner-field',
-          message: actualInfraId === expectedInfraId
-            ? 'Association confirmée via GET /runners (champ infrastructureId)'
+          method: 'get-runner',
+          message: actualInfraId === expectedInfraId 
+            ? 'Association confirmée via GET /runners/:id'
             : `Association différente: attendu ${expectedInfraId}, reçu ${actualInfraId}`,
         };
       }
     }
+    // If getRunner returned 404, continue to next method silently
+  } catch {
+    // GET /runners/:id not available, continue to fallback methods
   }
 
-  // Try from servers list
-  const serversResult = await listServers();
-  if (serversResult.success && serversResult.data) {
-    const server = serversResult.data.find(s => s.id === expectedInfraId);
-    if (server?.runnerId) {
-      return {
-        verifiable: true,
-        confirmed: server.runnerId === runnerId,
-        method: 'server-field',
-        message: server.runnerId === runnerId
-          ? 'Association confirmée via GET /servers (champ runnerId)'
-          : `Runner différent associé au serveur: ${server.runnerId}`,
-      };
+  try {
+    // Try from list of runners
+    const listResult = await listRunners();
+    if (listResult.success && listResult.data) {
+      const runner = listResult.data.find(r => r.id === runnerId);
+      if (runner) {
+        const actualInfraId = runner.infrastructureId || runner.serverId;
+        if (actualInfraId) {
+          return {
+            verifiable: true,
+            confirmed: actualInfraId === expectedInfraId,
+            method: 'runner-field',
+            message: actualInfraId === expectedInfraId
+              ? 'Association confirmée via GET /runners (champ infrastructureId)'
+              : `Association différente: attendu ${expectedInfraId}, reçu ${actualInfraId}`,
+          };
+        }
+      }
     }
+  } catch {
+    // GET /runners failed, continue
+  }
+
+  try {
+    // Try from servers list
+    const serversResult = await listServers();
+    if (serversResult.success && serversResult.data) {
+      const server = serversResult.data.find(s => s.id === expectedInfraId);
+      if (server?.runnerId) {
+        return {
+          verifiable: true,
+          confirmed: server.runnerId === runnerId,
+          method: 'server-field',
+          message: server.runnerId === runnerId
+            ? 'Association confirmée via GET /servers (champ runnerId)'
+            : `Runner différent associé au serveur: ${server.runnerId}`,
+        };
+      }
+    }
+  } catch {
+    // GET /servers failed, continue
   }
 
   return {
