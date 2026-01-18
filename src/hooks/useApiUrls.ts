@@ -10,27 +10,37 @@ const ENV_API_BASE_URL = import.meta.env.VITE_ORDERS_API_BASE_URL;
 const ENV_API_V1_URL = import.meta.env.VITE_ORDERS_API_V1_URL;
 
 // Default values (lowest priority)
-const DEFAULT_API_BASE_URL = 'https://api.ikomadigit.com';
-const DEFAULT_API_V1_URL = 'https://api.ikomadigit.com/v1';
+// BFF-first: In production, we always want to go through /api
+const DEFAULT_API_BASE_URL = '/api';
+const DEFAULT_API_V1_URL = '/api/v1';
 
 /**
  * Hook to get API URLs with priority:
  * 1. Environment variables (VITE_ORDERS_API_BASE_URL, VITE_ORDERS_API_V1_URL)
  * 2. Database settings (orders_api_base_url, orders_api_v1_url)
- * 3. Default values (https://api.ikomadigit.com)
+ * 3. Default values (/api)
  */
 export function useApiUrls() {
   const { getSetting, isLoading } = useSettings();
 
   const urls = useMemo(() => {
     // Priority: database setting > env var > default
-    const baseUrl = getSetting(SETTING_API_BASE_URL) || ENV_API_BASE_URL || DEFAULT_API_BASE_URL;
-    const v1Url = getSetting(SETTING_API_V1_URL) || ENV_API_V1_URL || DEFAULT_API_V1_URL;
+    let baseUrl = getSetting(SETTING_API_BASE_URL) || ENV_API_BASE_URL || DEFAULT_API_BASE_URL;
+    let v1Url = getSetting(SETTING_API_V1_URL) || ENV_API_V1_URL || DEFAULT_API_V1_URL;
+
+    // Safety: If we are on runner.ikomadigit.com, ensure we don't call api.ikomadigit.com directly from browser
+    if (typeof window !== 'undefined' && window.location.hostname === 'runner.ikomadigit.com') {
+      if (baseUrl.includes('api.ikomadigit.com')) {
+        console.warn('[useApiUrls] Direct API access detected on production domain. Forcing BFF proxy.');
+        baseUrl = '/api';
+        v1Url = '/api/v1';
+      }
+    }
 
     return {
       baseUrl,
       v1Url,
-      installScriptUrl: `${baseUrl}/install-runner.sh`,
+      installScriptUrl: baseUrl.startsWith('/') ? `${window.location.origin}${baseUrl}/install-runner.sh` : `${baseUrl}/install-runner.sh`,
     };
   }, [getSetting]);
 

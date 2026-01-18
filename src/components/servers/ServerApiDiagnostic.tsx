@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Stethoscope, Check, X, Loader2, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Stethoscope, Check, X, Loader2, RefreshCw, ChevronDown, ChevronUp, Globe, ShieldCheck, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -114,7 +114,7 @@ export function ServerApiDiagnostic() {
           >
             <div className="flex items-center gap-2">
               <Stethoscope className="w-4 h-4 text-primary" />
-              <span className="font-medium">Diagnostic API Serveurs</span>
+              <span className="font-medium">Diagnostic BFF (Proxy API)</span>
               {results.length > 0 && (
                 <Badge 
                   variant={allSuccess ? 'default' : 'destructive'}
@@ -154,7 +154,7 @@ export function ServerApiDiagnostic() {
 
             {results.length > 0 && (
               <div className="space-y-2">
-                <h4 className="text-sm font-medium">Résultats</h4>
+                <h4 className="text-sm font-medium">Résultats Endpoints</h4>
                 <div className="space-y-1">
                   {results.map((r, i) => (
                     <div 
@@ -204,27 +204,56 @@ export function ServerApiDiagnostic() {
               <Collapsible open={logsExpanded} onOpenChange={setLogsExpanded}>
                 <CollapsibleTrigger asChild>
                   <Button variant="ghost" size="sm" className="w-full justify-between">
-                    <span>Logs proxy ({logs.length})</span>
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-3 h-3" />
+                      <span>Logs détaillés du Proxy ({logs.length})</span>
+                    </div>
                     {logsExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="mt-2 max-h-48 overflow-y-auto bg-muted/50 rounded p-2">
+                  <div className="mt-2 max-h-64 overflow-y-auto bg-muted/50 rounded p-2 space-y-2">
                     {logs.map((log, i) => (
-                      <div key={i} className="text-xs font-mono py-1 border-b border-border/30 last:border-0">
-                        <span className="text-muted-foreground">
-                          {log.timestamp.toLocaleTimeString()}
-                        </span>
-                        {' '}
-                        <span className={cn(
-                          log.success ? 'text-emerald-500' : 'text-destructive'
-                        )}>
-                          [{log.statusCode || '?'}]
-                        </span>
-                        {' '}
-                        <span>{log.action}</span>
+                      <div key={i} className="text-[10px] font-mono py-2 border-b border-border/30 last:border-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-muted-foreground">
+                            {log.timestamp.toLocaleTimeString()}
+                          </span>
+                          <span className={cn(
+                            'px-1 rounded',
+                            log.success ? 'bg-emerald-500/20 text-emerald-500' : 'bg-destructive/20 text-destructive'
+                          )}>
+                            HTTP {log.statusCode || '???'}
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-1 mb-1">
+                          <Badge variant="outline" className="text-[9px] h-4 px-1">{log.method}</Badge>
+                          <span className="font-bold">{log.endpoint}</span>
+                        </div>
+
+                        {log.proxy_target && (
+                          <div className="flex items-start gap-1 text-muted-foreground mt-1">
+                            <Globe className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                            <span className="break-all">Target: {log.proxy_target}</span>
+                          </div>
+                        )}
+
+                        {log.proxy_status !== undefined && (
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <div className={cn(
+                              'w-1.5 h-1.5 rounded-full',
+                              log.proxy_status >= 200 && log.proxy_status < 300 ? 'bg-emerald-500' : 'bg-destructive'
+                            )} />
+                            <span>API Status: {log.proxy_status}</span>
+                          </div>
+                        )}
+
                         {log.error && (
-                          <span className="text-destructive block pl-4">→ {log.error}</span>
+                          <div className="flex items-start gap-1 text-destructive mt-1 bg-destructive/5 p-1 rounded">
+                            <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                            <span>Error: {log.error}</span>
+                          </div>
                         )}
                       </div>
                     ))}

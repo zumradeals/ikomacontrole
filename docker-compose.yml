@@ -2,11 +2,18 @@ version: '3.8'
 
 services:
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
+    build: .
     container_name: ikoma-frontend
     restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./logs/caddy:/var/log/caddy
+    depends_on:
+      - bff
 
   bff:
     build:
@@ -14,12 +21,15 @@ services:
     container_name: ikoma-bff
     restart: always
     environment:
-      - IKOMA_ORDERS_BASE_URL=${IKOMA_ORDERS_BASE_URL}
+      - IKOMA_ORDERS_BASE_URL=https://api.ikomadigit.com/v1
       - IKOMA_ADMIN_KEY=${IKOMA_ADMIN_KEY}
-      - AUTH_MODE=${AUTH_MODE}
-      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
-    ports:
-      - "3000:3000"
+      - AUTH_MODE=none
+    volumes:
+      - ./logs/bff:/app/logs
+
+volumes:
+  caddy_data:
+  caddy_config:
 
 networks:
   default:

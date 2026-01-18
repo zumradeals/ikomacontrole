@@ -1,15 +1,18 @@
 runner.ikomadigit.com {
-    # Frontend static files
-    root * /usr/share/nginx/html
+    # Serve static frontend
+    root * /usr/share/caddy
     file_server
+    
+    # Handle SPA routing
+    try_files {path} /index.html
 
-    # BFF API
+    # BFF Proxy: /api/* -> bff:3000/api/*
     handle /api/* {
         reverse_proxy bff:3000
     }
 
-    # Fallback to index.html for SPA routing
-    handle {
-        try_files {path} /index.html
+    # Logging for diagnostics
+    log {
+        output file /var/log/caddy/access.log
     }
 }

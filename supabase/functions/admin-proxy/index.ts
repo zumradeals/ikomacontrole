@@ -41,6 +41,17 @@ serve(async (req) => {
       );
     }
 
+    // Security: Block any direct access to runners by ID if requested via path
+    if (path.match(/^\/runners\/[^/]+$/) && (method === 'GET')) {
+      return new Response(
+        JSON.stringify({ error: 'GET /runners/:id is not supported. Use GET /runners and filter locally.' }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     const targetUrl = `${baseUrl}/v1${path}`;
     const httpMethod = method || 'GET';
     console.info(`Proxying ${httpMethod} ${targetUrl}`);
@@ -61,7 +72,9 @@ serve(async (req) => {
       fetchOptions.body = JSON.stringify({});
     }
 
+    const startTime = Date.now();
     const response = await fetch(targetUrl, fetchOptions);
+    const duration = Date.now() - startTime;
     
     let responseData;
     const contentType = response.headers.get('content-type');
@@ -72,15 +85,23 @@ serve(async (req) => {
       responseData = await response.text();
     }
 
-    console.info(`Proxy response status: ${response.status}`);
+    console.info(`Proxy response status: ${response.status} (${duration}ms)`);
 
-    // Handle non-2xx responses - return error directly without processing
+    // Prepare base response with proxy diagnostic info
+    const baseResponse = {
+      proxy_target: targetUrl,
+      proxy_status: response.status,
+      proxy_duration: duration,
+    };
+
+    // Handle non-2xx responses
     if (!response.ok) {
       console.error(`API error: ${response.status}`, responseData);
       return new Response(
         JSON.stringify({ 
+          ...baseResponse,
           error: responseData?.message || responseData?.error || `API returned ${response.status}`,
-          status: response.status 
+          proxy_error: responseData
         }),
         { 
           status: response.status, 
@@ -100,65 +121,15 @@ serve(async (req) => {
             lastHeartbeatAt: runner.last_seen_at || runner.lastHeartbeatAt || runner.last_heartbeat_at,
             infrastructureId: runner.infrastructure_id || runner.infrastructureId,
             serverId: runner.server_id || runner.serverId,
+            serverName: runner.server_name || runner.serverName,
             scopes: runner.scopes,
             capabilities: runner.capabilities,
             hostInfo: runner.host_info || runner.hostInfo,
             createdAt: runner.created_at || runner.createdAt,
           }))
         : [];
-      console.info(`Found ${runners.length} runners`);
       return new Response(
-        JSON.stringify({ runners }),
-        { 
-          status: 200, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
-    }
-
-    // For GET /runners/:id, normalize single runner response
-    if (path.match(/^\/runners\/[^/]+$/) && httpMethod === 'GET') {
-      const runner = responseData?.runner || responseData;
-      if (runner && typeof runner === 'object') {
-        const normalizedRunner = {
-          id: runner.id,
-          name: runner.name,
-          status: runner.status,
-          lastHeartbeatAt: runner.last_seen_at || runner.lastHeartbeatAt || runner.last_heartbeat_at,
-          infrastructureId: runner.infrastructure_id || runner.infrastructureId,
-          serverId: runner.server_id || runner.serverId,
-          scopes: runner.scopes,
-          capabilities: runner.capabilities,
-          hostInfo: runner.host_info || runner.hostInfo,
-          createdAt: runner.created_at || runner.createdAt,
-        };
-        return new Response(
-          JSON.stringify(normalizedRunner),
-          { 
-            status: 200, 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-          }
-        );
-      }
-    }
-
-    // For PATCH /runners/:id, return the updated runner or success
-    if (path.match(/^\/runners\/[^/]+$/) && httpMethod === 'PATCH') {
-      console.info('PATCH runner response:', responseData);
-      return new Response(
-        JSON.stringify(responseData || { success: true }),
-        { 
-          status: 200, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
-    }
-
-    // For DELETE /runners/:id
-    if (path.match(/^\/runners\/[^/]+$/) && httpMethod === 'DELETE') {
-      console.info('DELETE runner response:', responseData);
-      return new Response(
-        JSON.stringify(responseData || { success: true }),
+        JSON.stringify(runners),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -177,16 +148,15 @@ serve(async (req) => {
             ip: server.ip,
             baseUrl: server.base_url || server.baseUrl,
             runnerId: server.runner_id || server.runnerId || (server.runner as Record<string, unknown>)?.id,
-            runnerName: (server.runner as Record<string, unknown>)?.name,
-            runnerStatus: (server.runner as Record<string, unknown>)?.status,
+            runnerName: (server.runner as Record<string, unknown>)?.name || server.runner_name || server.runnerName,
+            runnerStatus: (server.runner as Record<string, unknown>)?.status || server.runner_status || server.runnerStatus,
             status: server.status,
             createdAt: server.created_at || server.createdAt,
             updatedAt: server.updated_at || server.updatedAt,
           }))
         : [];
-      console.info(`Found ${servers.length} servers`);
       return new Response(
-        JSON.stringify({ servers }),
+        JSON.stringify(servers),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -194,72 +164,13 @@ serve(async (req) => {
       );
     }
 
-    // For GET /servers/:id, normalize single server response
-    if (path.match(/^\/servers\/[^/]+$/) && httpMethod === 'GET') {
-      const server = responseData?.server || responseData;
-      if (server && typeof server === 'object') {
-        const normalizedServer = {
-          id: server.id,
-          name: server.name,
-          host: server.host,
-          ip: server.ip,
-          baseUrl: server.base_url || server.baseUrl,
-          runnerId: server.runner_id || server.runnerId || (server.runner as Record<string, unknown>)?.id,
-          runnerName: (server.runner as Record<string, unknown>)?.name,
-          runnerStatus: (server.runner as Record<string, unknown>)?.status,
-          status: server.status,
-          createdAt: server.created_at || server.createdAt,
-          updatedAt: server.updated_at || server.updatedAt,
-        };
-        return new Response(
-          JSON.stringify(normalizedServer),
-          { 
-            status: 200, 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-          }
-        );
-      }
-    }
-
-    // For POST /servers, return created server
-    if (path === '/servers' && httpMethod === 'POST') {
-      console.info('POST server response:', responseData);
-      const server = responseData?.server || responseData;
-      return new Response(
-        JSON.stringify(server),
-        { 
-          status: 201, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
-    }
-
-    // For PATCH /servers/:id, return the updated server
-    if (path.match(/^\/servers\/[^/]+$/) && httpMethod === 'PATCH') {
-      console.info('PATCH server response:', responseData);
-      return new Response(
-        JSON.stringify(responseData || { success: true }),
-        { 
-          status: 200, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
-    }
-
-    // For DELETE /servers/:id
-    if (path.match(/^\/servers\/[^/]+$/) && httpMethod === 'DELETE') {
-      console.info('DELETE server response:', responseData);
-      return new Response(
-        JSON.stringify(responseData || { success: true }),
-        { 
-          status: 200, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-        }
-      );
-    }
+    // Default: return the data as is but wrapped with proxy info if it's an object
+    const finalData = (typeof responseData === 'object' && responseData !== null)
+      ? { ...responseData, ...baseResponse }
+      : responseData;
 
     return new Response(
-      JSON.stringify(responseData),
+      JSON.stringify(finalData),
       { 
         status: response.status, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

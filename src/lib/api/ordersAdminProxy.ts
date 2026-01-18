@@ -35,6 +35,7 @@ export interface ProxyRunner {
   lastHeartbeatAt: string | null;
   infrastructureId: string | null;
   serverId?: string | null;
+  serverName?: string | null;
   scopes?: string[];
   capabilities?: Record<string, unknown>;
   hostInfo?: {
@@ -63,6 +64,9 @@ export interface ProxyLogEntry {
   success: boolean;
   error?: string;
   duration?: number;
+  proxy_target?: string;
+  proxy_status?: number;
+  proxy_error?: string;
 }
 
 // ============================================
@@ -131,17 +135,22 @@ async function bffRequest<T = unknown>(request: ProxyRequest): Promise<ApiRespon
     const duration = Date.now() - startTime;
     const data = await response.json().catch(() => null);
 
+    // Enhanced logging for BFF diagnostic
+    const logEntry: Omit<ProxyLogEntry, 'timestamp'> = {
+      action: `${request.method} ${request.path}`,
+      endpoint: request.path,
+      method: request.method,
+      statusCode: response.status,
+      success: response.ok,
+      duration,
+      proxy_target: data?.proxy_target,
+      proxy_status: data?.proxy_status,
+      proxy_error: data?.proxy_error || data?.error || data?.message,
+    };
+
     if (!response.ok) {
       const errorMsg = data?.error || data?.message || `HTTP ${response.status}`;
-      addLog({
-        action: `${request.method} ${request.path}`,
-        endpoint: request.path,
-        method: request.method,
-        statusCode: response.status,
-        success: false,
-        error: errorMsg,
-        duration,
-      });
+      addLog({ ...logEntry, error: errorMsg });
       return { 
         success: false, 
         error: errorMsg, 
@@ -149,15 +158,7 @@ async function bffRequest<T = unknown>(request: ProxyRequest): Promise<ApiRespon
       };
     }
 
-    addLog({
-      action: `${request.method} ${request.path}`,
-      endpoint: request.path,
-      method: request.method,
-      statusCode: 200,
-      success: true,
-      duration,
-    });
-
+    addLog(logEntry);
     return { success: true, data: data as T, statusCode: 200 };
   } catch (err) {
     const duration = Date.now() - startTime;
@@ -191,6 +192,7 @@ export function mapRunner(raw: any): ProxyRunner {
     lastHeartbeatAt: raw.last_heartbeat_at || raw.lastHeartbeatAt || raw.last_seen_at || null,
     infrastructureId: raw.infrastructure_id ?? raw.infrastructureId ?? raw.server_id ?? raw.serverId ?? null,
     serverId: raw.server_id ?? raw.serverId ?? raw.infrastructure_id ?? raw.infrastructureId ?? null,
+    serverName: raw.server_name ?? raw.serverName ?? null,
     scopes: raw.scopes,
     capabilities: raw.capabilities,
     hostInfo: raw.host_info || raw.hostInfo,
@@ -206,8 +208,8 @@ export function mapServer(raw: any): ProxyServer {
     host: raw.host,
     ip: raw.ip,
     runnerId,
-    runnerName: raw.runner?.name ?? null,
-    runnerStatus: raw.runner?.status ?? null,
+    runnerName: raw.runner?.name ?? raw.runnerName ?? null,
+    runnerStatus: raw.runner?.status ?? raw.runnerStatus ?? null,
     status: raw.status,
     createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
     updatedAt: raw.updated_at || raw.updatedAt,
@@ -234,6 +236,21 @@ export async function listRunners(): Promise<ApiResponse<ProxyRunner[]>> {
     success: true,
     data: rawRunners.map(mapRunner),
   };
+}
+
+/**
+ * GET /runners/:id is deprecated. 
+ * Use listRunners() and find the runner in the list.
+ */
+export async function getRunnerById(id: string): Promise<ApiResponse<ProxyRunner>> {
+  console.warn(`[getRunnerById] Deprecated call for ${id}. Resolving from local list.`);
+  const list = await listRunners();
+  if (!list.success || !list.data) return { success: false, error: list.error };
+  
+  const runner = list.data.find(r => r.id === id);
+  if (!runner) return { success: false, error: 'Runner not found in list', statusCode: 404 };
+  
+  return { success: true, data: runner };
 }
 
 export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {

@@ -18,7 +18,7 @@ const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
 
 // Register CORS
 fastify.register(cors, {
-  origin: true // In production, restrict this to the frontend domain
+  origin: true 
 });
 
 // Register JWT if using Supabase auth
@@ -41,7 +41,7 @@ fastify.addHook('preHandler', async (request, reply) => {
   }
 });
 
-// Helper for Orders API calls
+// Helper for Orders API calls with detailed logging
 const ordersApi = axios.create({
   baseURL: IKOMA_ORDERS_BASE_URL,
   headers: {
@@ -49,6 +49,24 @@ const ordersApi = axios.create({
     'Content-Type': 'application/json'
   }
 });
+
+// Response interceptor for logging
+ordersApi.interceptors.response.use(
+  (response) => {
+    console.info(`[BFF Proxy] SUCCESS: ${response.config.method.toUpperCase()} ${response.config.url} -> ${response.status}`);
+    return response;
+  },
+  (error) => {
+    const status = error.response?.status || 'NETWORK_ERROR';
+    const target = error.config?.url || 'unknown';
+    const method = error.config?.method?.toUpperCase() || 'unknown';
+    console.error(`[BFF Proxy] ERROR: ${method} ${target} -> ${status}`);
+    if (error.response?.data) {
+      console.error(`[BFF Proxy] Payload:`, JSON.stringify(error.response.data));
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Routes
 fastify.get('/api/health', async () => {
@@ -60,23 +78,60 @@ fastify.get('/api/health', async () => {
   }
 });
 
+// Runners
 fastify.get('/api/runners', async (request, reply) => {
   try {
     const response = await ordersApi.get('/runners');
     return response.data;
   } catch (error) {
-    fastify.log.error(error);
+    reply.code(error.response?.status || 500).send({
+      ... (error.response?.data || { error: 'Internal Server Error' }),
+      proxy_target: `${IKOMA_ORDERS_BASE_URL}/runners`,
+      proxy_status: error.response?.status
+    });
+  }
+});
+
+fastify.post('/api/runners', async (request, reply) => {
+  try {
+    const response = await ordersApi.post('/runners', request.body);
+    return response.data;
+  } catch (error) {
     reply.code(error.response?.status || 500).send(error.response?.data || { error: 'Internal Server Error' });
   }
 });
 
+fastify.delete('/api/runners/:id', async (request, reply) => {
+  try {
+    const { id } = request.params;
+    const response = await ordersApi.delete(`/runners/${id}`);
+    return response.data;
+  } catch (error) {
+    reply.code(error.response?.status || 500).send(error.response?.data || { error: 'Internal Server Error' });
+  }
+});
+
+fastify.post('/api/runners/:id/token/reset', async (request, reply) => {
+  try {
+    const { id } = request.params;
+    const response = await ordersApi.post(`/runners/${id}/token/reset`, {});
+    return response.data;
+  } catch (error) {
+    reply.code(error.response?.status || 500).send(error.response?.data || { error: 'Internal Server Error' });
+  }
+});
+
+// Servers
 fastify.get('/api/servers', async (request, reply) => {
   try {
     const response = await ordersApi.get('/servers');
     return response.data;
   } catch (error) {
-    fastify.log.error(error);
-    reply.code(error.response?.status || 500).send(error.response?.data || { error: 'Internal Server Error' });
+    reply.code(error.response?.status || 500).send({
+      ... (error.response?.data || { error: 'Internal Server Error' }),
+      proxy_target: `${IKOMA_ORDERS_BASE_URL}/servers`,
+      proxy_status: error.response?.status
+    });
   }
 });
 
@@ -85,7 +140,6 @@ fastify.post('/api/servers', async (request, reply) => {
     const response = await ordersApi.post('/servers', request.body);
     return response.data;
   } catch (error) {
-    fastify.log.error(error);
     reply.code(error.response?.status || 500).send(error.response?.data || { error: 'Internal Server Error' });
   }
 });
@@ -96,7 +150,21 @@ fastify.patch('/api/servers/:id', async (request, reply) => {
     const response = await ordersApi.patch(`/servers/${id}`, request.body);
     return response.data;
   } catch (error) {
-    fastify.log.error(error);
+    reply.code(error.response?.status || 500).send({
+      ... (error.response?.data || { error: 'Internal Server Error' }),
+      proxy_target: `${IKOMA_ORDERS_BASE_URL}/servers/${id}`,
+      proxy_status: error.response?.status,
+      proxy_error: error.response?.data
+    });
+  }
+});
+
+fastify.delete('/api/servers/:id', async (request, reply) => {
+  try {
+    const { id } = request.params;
+    const response = await ordersApi.delete(`/servers/${id}`);
+    return response.data;
+  } catch (error) {
     reply.code(error.response?.status || 500).send(error.response?.data || { error: 'Internal Server Error' });
   }
 });

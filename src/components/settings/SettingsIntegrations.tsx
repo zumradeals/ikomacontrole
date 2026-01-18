@@ -1,4 +1,4 @@
-import { Link2, Key, GitBranch, Webhook, RefreshCw, Eye, EyeOff, Copy, Save, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Link2, Key, GitBranch, Webhook, RefreshCw, Eye, EyeOff, Copy, Save, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -6,14 +6,16 @@ import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { toast } from 'sonner';
 import { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '@/hooks/useSettings';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // Setting keys for API URLs
 const SETTING_API_BASE_URL = 'orders_api_base_url';
 const SETTING_API_V1_URL = 'orders_api_v1_url';
 
 // Default values (fallback if no setting exists)
-const DEFAULT_API_BASE_URL = 'https://api.ikomadigit.com';
-const DEFAULT_API_V1_URL = 'https://api.ikomadigit.com/v1';
+// BFF-first: Default to local proxy
+const DEFAULT_API_BASE_URL = '/api';
+const DEFAULT_API_V1_URL = '/api/v1';
 
 export function SettingsIntegrations() {
   const [showToken, setShowToken] = useState(false);
@@ -51,22 +53,26 @@ export function SettingsIntegrations() {
       warnings.push('L\'URL V1 devrait se terminer par /v1');
     }
 
-    // Check URLs are valid
-    try {
-      new URL(baseUrl);
-    } catch {
-      if (baseUrl) errors.push('URL de base invalide');
+    // Check if using external API directly
+    if (baseUrl.includes('api.ikomadigit.com')) {
+      warnings.push('Attention: L\'utilisation directe de api.ikomadigit.com est déconseillée (BFF-first requis). Utilisez /api.');
     }
 
-    try {
-      new URL(v1Url);
-    } catch {
-      if (v1Url) errors.push('URL V1 invalide');
+    // Check URLs are valid (if not relative)
+    if (baseUrl.startsWith('http')) {
+      try {
+        new URL(baseUrl);
+      } catch {
+        errors.push('URL de base invalide');
+      }
     }
 
-    // Check consistency - V1 URL should start with base URL
-    if (baseUrl && v1Url && !v1Url.startsWith(baseUrl)) {
-      warnings.push('L\'URL V1 devrait commencer par l\'URL de base');
+    if (v1Url.startsWith('http')) {
+      try {
+        new URL(v1Url);
+      } catch {
+        errors.push('URL V1 invalide');
+      }
     }
 
     return {
@@ -128,17 +134,25 @@ export function SettingsIntegrations() {
             API Orders (IKOMA)
           </h3>
           <p className="text-sm text-muted-foreground mt-1">
-            Configuration des URLs de l'API externe
+            Configuration des URLs de l'API externe (via BFF)
           </p>
         </div>
+
+        <Alert className="bg-primary/5 border-primary/20">
+          <Info className="w-4 h-4 text-primary" />
+          <AlertDescription className="text-xs">
+            <strong>Architecture BFF-first :</strong> Pour des raisons de sécurité, le frontend ne doit jamais appeler directement l'API externe. 
+            Utilisez <code className="bg-muted px-1 rounded">/api</code> pour passer par le proxy sécurisé.
+          </AlertDescription>
+        </Alert>
         
         <div className="space-y-4">
           {/* Base URL */}
           <div className="space-y-2">
             <Label htmlFor="api-base-url">
-              URL de base
+              URL de base (BFF Proxy)
               <span className="text-xs text-muted-foreground ml-2">
-                (endpoints: /health, /ready, /install-runner.sh)
+                (recommandé: /api)
               </span>
             </Label>
             <div className="flex gap-2">
@@ -164,9 +178,9 @@ export function SettingsIntegrations() {
           {/* V1 URL */}
           <div className="space-y-2">
             <Label htmlFor="api-v1-url">
-              URL V1
+              URL V1 (BFF Proxy)
               <span className="text-xs text-muted-foreground ml-2">
-                (endpoints métier: /v1/*)
+                (recommandé: /api/v1)
               </span>
             </Label>
             <div className="flex gap-2">
