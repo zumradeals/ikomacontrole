@@ -12,7 +12,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 import {
   listRunners,
-  getRunner,
   createRunner,
   resetRunnerToken,
   deleteRunner,
@@ -59,35 +58,41 @@ export function useProxyRunnersV2() {
     staleTime: 10000,
   });
 }
-
 /**
- * Fetch a single runner by ID.
- * NOTE: GET /runners/:id may not be supported by the API (returns 404).
- * This hook handles 404 gracefully by returning null.
+ * @deprecated DO NOT USE - GET /runners/:id is not supported by the IKOMA Orders API.
+ * Use useProxyRunnersV2() to get the list, then resolve locally with findRunnerInList().
+ * 
+ * This hook is kept for backward compatibility but will always return null
+ * since the API returns 404 for individual runner fetches.
  */
 export function useProxyRunnerV2(runnerId: string | null) {
   return useQuery({
     queryKey: serverQueryKeys.runner(runnerId || ''),
     queryFn: async (): Promise<ProxyRunner | null> => {
-      if (!runnerId) return null;
-      const result = await getRunner(runnerId);
-      // Handle 404 gracefully - endpoint may not exist
-      if (!result.success) {
-        if (result.statusCode === 404) {
-          console.log(`[useProxyRunnerV2] GET /runners/${runnerId} returned 404 - endpoint not supported`);
-          return null;
-        }
-        throw new Error(result.error || 'Failed to fetch runner');
-      }
-      return result.data || null;
+      // DO NOT call getRunner - it will return 404
+      // Instead, return null and let callers use the list-based approach
+      console.warn(`[useProxyRunnerV2] DEPRECATED: GET /runners/:id not supported. Use list-based resolution instead.`);
+      return null;
     },
-    enabled: !!runnerId,
-    retry: (failureCount, error) => {
-      // Don't retry on 404
-      if (error instanceof Error && error.message.includes('404')) return false;
-      return failureCount < 2;
-    },
+    enabled: false, // Disabled by default - force callers to use list approach
+    staleTime: Infinity, // Never refetch
   });
+}
+
+/**
+ * Find a runner by ID from a pre-fetched list.
+ * This is the recommended way to resolve runner details - use with useProxyRunnersV2().
+ * 
+ * @example
+ * const { data: runners } = useProxyRunnersV2();
+ * const runner = findRunnerInList(runners, server.runnerId);
+ */
+export function findRunnerInList(
+  runners: ProxyRunner[] | undefined, 
+  runnerId: string | null | undefined
+): ProxyRunner | null {
+  if (!runners || !runnerId) return null;
+  return runners.find(r => r.id === runnerId) || null;
 }
 
 /**
@@ -308,13 +313,15 @@ export function useCreateAndAttachRunner() {
 
       const runner = createResult.data;
 
-      // Step 2: Verify attachment (API might have done it automatically)
-      // If infrastructureId was passed to create, it might already be attached
-      // Let's verify by fetching the runner
-      const verifyResult = await getRunner(runner.id);
-      const isAttached = verifyResult.success && 
-        verifyResult.data && 
-        (verifyResult.data.infrastructureId === serverId || verifyResult.data.serverId === serverId);
+      // Step 2: Verify attachment using list-based resolution (GET /runners/:id not supported)
+      // Fetch all runners and find the one we just created
+      const listResult = await listRunners();
+      const createdRunner = listResult.success && listResult.data 
+        ? listResult.data.find(r => r.id === runner.id)
+        : null;
+      
+      const isAttached = createdRunner && 
+        (createdRunner.infrastructureId === serverId || createdRunner.serverId === serverId);
 
       if (isAttached) {
         return { runner, attached: true };
@@ -366,8 +373,8 @@ export function useProxyDiagnostics() {
 }
 
 /**
- * Fetch fresh runner data and compare with expected state.
- * Useful for verifying that an association was successful.
+ * Verify runner association using list-based resolution.
+ * GET /runners/:id is not supported by IKOMA API, so we use listRunners instead.
  */
 export function useVerifyRunnerAssociation() {
   return useMutation({
@@ -382,13 +389,18 @@ export function useVerifyRunnerAssociation() {
       actualInfraId: string | null; 
       runner: ProxyRunner | null 
     }> => {
-      const result = await getRunner(runnerId);
+      // Use list-based resolution instead of GET /runners/:id
+      const result = await listRunners();
       
       if (!result.success || !result.data) {
         return { verified: false, actualInfraId: null, runner: null };
       }
 
-      const runner = result.data;
+      const runner = result.data.find(r => r.id === runnerId);
+      if (!runner) {
+        return { verified: false, actualInfraId: null, runner: null };
+      }
+
       const actualInfraId = runner.infrastructureId || runner.serverId || null;
       const verified = actualInfraId === expectedInfraId;
 
