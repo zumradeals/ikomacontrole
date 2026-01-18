@@ -1,3 +1,18 @@
+/**
+ * ORDERS HOOK
+ * 
+ * NOTE: Orders are created/stored in the local Supabase database and synced
+ * with the runner-api Edge Function. This is intentional because:
+ * 1. Orders are created by the control plane (this app)
+ * 2. Runners poll the runner-api to claim orders
+ * 3. Results are reported back and stored in Supabase
+ * 
+ * The local Supabase 'orders' table IS the source of truth for order state
+ * because this control plane creates and manages orders.
+ * 
+ * This is different from 'runners' where the external API is the source of truth.
+ */
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -39,6 +54,12 @@ export interface CreateOrderInput {
   command: string;
 }
 
+/**
+ * Fetch orders from local Supabase.
+ * Orders are managed locally because this control plane creates them.
+ * 
+ * NOTE: This uses Supabase directly because orders originate from this app.
+ */
 export function useOrders(runnerId?: string) {
   return useQuery({
     queryKey: ['orders', runnerId],
@@ -63,6 +84,10 @@ export function useOrders(runnerId?: string) {
   });
 }
 
+/**
+ * Create a new order in local Supabase.
+ * The runner will pick this up via the runner-api Edge Function.
+ */
 export function useCreateOrder() {
   const queryClient = useQueryClient();
 
@@ -105,6 +130,9 @@ export function useCreateOrder() {
   });
 }
 
+/**
+ * Cancel a pending order.
+ */
 export function useCancelOrder() {
   const queryClient = useQueryClient();
 

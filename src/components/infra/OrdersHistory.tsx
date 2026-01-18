@@ -1,3 +1,13 @@
+/**
+ * ORDERS HISTORY COMPONENT
+ * 
+ * NOTE: This component reads from the local Supabase 'orders' table.
+ * This is intentional because orders are created and managed by this control plane.
+ * The 'orders' table IS the source of truth for order execution state.
+ * 
+ * This is different from 'runners' where the external API is the source of truth.
+ */
+
 import { useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 

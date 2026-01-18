@@ -6,6 +6,7 @@ import { RunnerDiagnostics } from './RunnerDiagnostics';
 import { useProxyRunners, ProxyRunner } from '@/hooks/useProxyRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 import { useDeleteRunner } from '@/hooks/useRunners';
+// Note: useDeleteRunner now uses admin-proxy internally
 import {
   Table,
   TableBody,

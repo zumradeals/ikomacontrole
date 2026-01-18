@@ -105,23 +105,12 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
   const lastHeartbeatRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
-  // Fetch runner data with realtime updates
-  const { data: runnerData } = useQuery({
-    queryKey: ['runner-live', runner.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('runners')
-        .select('*')
-        .eq('id', runner.id)
-        .single();
-      
-      if (error) throw error;
-      return data;
-    },
-    refetchInterval: isPaused ? false : 2000,
-  });
+  // Note: We DO NOT fetch from supabase.from('runners') here anymore.
+  // Instead, we use the runner prop data which comes from the proxy.
+  // The runnerData query is removed to eliminate direct Supabase access to 'runners'.
+  const runnerData = runner; // Use the prop directly
 
-  // Fetch recent orders with refetch
+  // Fetch recent orders - this is OK, orders are managed locally in Supabase
   const { data: orders } = useQuery({
     queryKey: ['runner-logs-orders', runner.id],
     queryFn: async () => {
@@ -138,7 +127,7 @@ export function RunnerLogs({ runner }: RunnerLogsProps) {
     refetchInterval: isPaused ? false : 2000,
   });
 
-  // Fetch API logs (reports received, parse errors, etc.)
+  // Fetch API logs (reports received, parse errors, etc.) - local Supabase table
   const { data: apiLogs } = useQuery({
     queryKey: ['runner-api-logs', runner.id],
     queryFn: async () => {

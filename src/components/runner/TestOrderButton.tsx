@@ -1,3 +1,11 @@
+/**
+ * TEST ORDER BUTTON
+ * 
+ * NOTE: This component reads from the local Supabase 'orders' table to poll status.
+ * This is intentional - orders are created and managed by this control plane.
+ * The 'orders' table IS the source of truth for order execution state.
+ */
+
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { 

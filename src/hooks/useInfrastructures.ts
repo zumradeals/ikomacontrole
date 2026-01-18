@@ -1,8 +1,20 @@
+/**
+ * INFRASTRUCTURES HOOK
+ * 
+ * Infrastructures are managed locally in Supabase because they are 
+ * created/edited by this control plane. The external API only knows
+ * about infrastructureId as a reference field on runners.
+ * 
+ * IMPORTANT: useAssociateRunner now uses the admin-proxy to update
+ * the runner on the external API (source of truth for runners).
+ */
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
+import { attachRunnerToServer, detachRunnerFromServer } from '@/lib/api/ordersAdminProxy';
 
 export interface Infrastructure {
   id: string;
@@ -195,6 +207,8 @@ export function useDeleteInfrastructure() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['infrastructures'] });
       queryClient.invalidateQueries({ queryKey: ['runners'] });
+      queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });
+      queryClient.invalidateQueries({ queryKey: ['proxy-runners-v2'] });
       toast({
         title: 'Infrastructure supprimée',
         description: 'L\'infrastructure a été supprimée avec succès.',
@@ -210,28 +224,44 @@ export function useDeleteInfrastructure() {
   });
 }
 
+/**
+ * Associate/dissociate a runner with an infrastructure.
+ * 
+ * IMPORTANT: This now uses the admin-proxy to update the external API.
+ * The external Orders API is the source of truth for runner associations.
+ */
 export function useAssociateRunner() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async ({ runnerId, infrastructureId }: { runnerId: string; infrastructureId: string | null }) => {
-      const { error } = await supabase
-        .from('runners')
-        .update({ infrastructure_id: infrastructureId })
-        .eq('id', runnerId);
-
-      if (error) {
-        console.error('[useAssociateRunner] Update error:', error, { runnerId, infrastructureId });
-        throw error;
+      console.log('[useAssociateRunner] Via admin-proxy:', { runnerId, infrastructureId });
+      
+      if (infrastructureId) {
+        // Attach runner to infrastructure
+        const result = await attachRunnerToServer(infrastructureId, runnerId);
+        if (!result.success) {
+          throw new Error(result.message || 'Failed to associate runner');
+        }
+      } else {
+        // Detach runner from infrastructure
+        const result = await detachRunnerFromServer(runnerId);
+        if (!result.success) {
+          throw new Error(result.message || 'Failed to dissociate runner');
+        }
       }
     },
     onSuccess: (_, { infrastructureId }) => {
+      // Invalidate all related queries
       queryClient.invalidateQueries({ queryKey: ['runners'] });
+      queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });
+      queryClient.invalidateQueries({ queryKey: ['proxy-runners-v2'] });
       queryClient.invalidateQueries({ queryKey: ['infrastructures'] });
+      
       toast({
         title: infrastructureId ? 'Runner associé' : 'Runner dissocié',
         description: infrastructureId 
-          ? 'Le runner a été associé à l\'infrastructure.'
+          ? 'Le runner a été associé à l\'infrastructure via l\'API.'
           : 'Le runner a été dissocié de l\'infrastructure.',
       });
     },
