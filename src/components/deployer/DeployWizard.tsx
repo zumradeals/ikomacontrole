@@ -124,6 +124,7 @@ export function DeployWizard({ open, onOpenChange, onDeploymentCreated }: Deploy
   const [supabaseCredentials, setSupabaseCredentials] = useState<SupabaseCredentials | null>(null);
   const [parsedEnvVars, setParsedEnvVars] = useState<Record<string, string>>({});
   
+  // useRunners now uses admin-proxy internally (no more direct Supabase)
   const { data: runners } = useRunners();
   const { data: infrastructures } = useInfrastructures();
   const createDeployment = useCreateDeployment();

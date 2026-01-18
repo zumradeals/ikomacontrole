@@ -18,17 +18,14 @@ interface OnboardingStep {
 
 export function OnboardingBanner() {
   const { data: infrastructures } = useInfrastructures();
+  // useRunners now uses admin-proxy internally (no more direct Supabase)
   const { data: runners } = useRunners();
   const { data: platformInstances } = usePlatformInstances();
   const { data: deployments } = useDeployments();
 
   const hasInfra = (infrastructures?.length ?? 0) > 0;
   const hasRunner = (runners?.length ?? 0) > 0;
-  const hasOnlineRunner = runners?.some(r => {
-    if (!r.last_seen_at) return false;
-    const lastSeen = new Date(r.last_seen_at).getTime();
-    return Date.now() - lastSeen < 60000;
-  });
+  const hasOnlineRunner = runners?.some(r => r.status === 'online');
   const hasService = (platformInstances?.filter(p => p.status === 'installed')?.length ?? 0) > 0;
   const hasDeployment = (deployments?.length ?? 0) > 0;
 

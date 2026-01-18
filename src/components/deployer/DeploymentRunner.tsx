@@ -1,3 +1,13 @@
+/**
+ * DEPLOYMENT RUNNER
+ * 
+ * NOTE: This component polls the local Supabase 'orders' table to track step execution.
+ * This is intentional - orders are created and managed by this control plane.
+ * The 'orders' table IS the source of truth for order execution state.
+ * 
+ * The 'deployment_steps' table is also local and managed by this control plane.
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { 
   Loader2, 

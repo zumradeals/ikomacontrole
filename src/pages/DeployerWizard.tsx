@@ -144,6 +144,7 @@ const DeployerWizard = () => {
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [envVarsText, setEnvVarsText] = useState('');
 
+  // useRunners now uses admin-proxy internally (no more direct Supabase)
   const { data: runners } = useRunners();
   const { data: infrastructures } = useInfrastructures();
   const createDeployment = useCreateDeployment();

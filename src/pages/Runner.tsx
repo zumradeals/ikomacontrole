@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { ApiHealthCheck } from '@/components/runner/ApiHealthCheck';
 import { RunnersTable } from '@/components/runner/RunnersTable';
 import { RunnerInstallWizard } from '@/components/runner/RunnerInstallWizard';
-import { useProxyRunners } from '@/hooks/useProxyRunners';
+// useRunners now uses admin-proxy internally (no more direct Supabase)
+import { useRunners } from '@/hooks/useRunners';
 import { useInfrastructures } from '@/hooks/useInfrastructures';
 
 const Runner = () => {
-  // Use proxy instead of direct Supabase to avoid divergence
-  const { data: runners, refetch: refetchRunners, isLoading: runnersLoading } = useProxyRunners();
+  // useRunners now uses admin-proxy internally - no more divergence
+  const { data: runners, refetch: refetchRunners, isLoading: runnersLoading } = useRunners();
   const { data: infrastructures } = useInfrastructures();
 
   const hasRunners = (runners?.length ?? 0) > 0;
