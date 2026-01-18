@@ -274,7 +274,11 @@ export async function getRunner(runnerId: string): Promise<ApiResponse<ProxyRunn
   });
 
   if (!response.success || !response.data) {
-    return { success: false, error: response.error };
+    return { 
+      success: false, 
+      error: response.error,
+      statusCode: response.statusCode, // Propagate status code for 404 detection
+    };
   }
 
   return {
@@ -326,7 +330,7 @@ export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
   if (!response.success) {
     // API might not have /servers endpoint - this is OK, we use local Supabase
     console.log('[ordersAdminProxy] /servers not available, using local data');
-    return { success: false, error: response.error };
+    return { success: false, error: response.error, statusCode: response.statusCode };
   }
 
   if (!response.data) {
@@ -350,7 +354,7 @@ export async function getServer(serverId: string): Promise<ApiResponse<ProxyServ
   });
 
   if (!response.success || !response.data) {
-    return { success: false, error: response.error };
+    return { success: false, error: response.error, statusCode: response.statusCode };
   }
 
   return {

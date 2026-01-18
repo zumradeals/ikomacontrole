@@ -188,28 +188,49 @@ export async function runApiContractDiagnostic(): Promise<ApiContractDiagnostic>
   let sampleServer: ProxyServer | null = null;
 
   // Test GET /runners
-  const runnersResult = await listRunners();
-  endpoints.push({
-    ...REQUIRED_ENDPOINTS[0],
-    status: runnersResult.success ? 'available' : 'error',
-    lastTestedAt: new Date(),
-    errorMessage: runnersResult.error,
-  });
+  try {
+    const runnersResult = await listRunners();
+    endpoints.push({
+      ...REQUIRED_ENDPOINTS[0],
+      status: runnersResult.success ? 'available' : 'error',
+      lastTestedAt: new Date(),
+      errorMessage: runnersResult.error,
+    });
 
-  if (runnersResult.success && runnersResult.data?.length) {
-    sampleRunner = runnersResult.data[0];
+    if (runnersResult.success && runnersResult.data?.length) {
+      sampleRunner = runnersResult.data[0];
+    }
+  } catch (err) {
+    console.error('[ApiContractDiagnostic] GET /runners failed:', err);
+    endpoints.push({
+      ...REQUIRED_ENDPOINTS[0],
+      status: 'error',
+      lastTestedAt: new Date(),
+      errorMessage: err instanceof Error ? err.message : 'Unknown error',
+    });
   }
 
   // Test GET /runners/:id (if we have a sample runner)
   if (sampleRunner) {
-    const singleRunnerResult = await getRunner(sampleRunner.id);
-    endpoints.push({
-      ...REQUIRED_ENDPOINTS[1],
-      status: singleRunnerResult.success ? 'available' : 
-              singleRunnerResult.statusCode === 404 ? 'missing' : 'error',
-      lastTestedAt: new Date(),
-      errorMessage: singleRunnerResult.error,
-    });
+    try {
+      const singleRunnerResult = await getRunner(sampleRunner.id);
+      endpoints.push({
+        ...REQUIRED_ENDPOINTS[1],
+        status: singleRunnerResult.success ? 'available' : 
+                singleRunnerResult.statusCode === 404 ? 'missing' : 'error',
+        lastTestedAt: new Date(),
+        errorMessage: singleRunnerResult.success ? undefined : 
+                      singleRunnerResult.statusCode === 404 ? 'Endpoint non implémenté (404)' : singleRunnerResult.error,
+      });
+    } catch (err) {
+      console.error('[ApiContractDiagnostic] GET /runners/:id failed:', err);
+      endpoints.push({
+        ...REQUIRED_ENDPOINTS[1],
+        status: 'missing',
+        lastTestedAt: new Date(),
+        errorMessage: 'Endpoint non disponible',
+      });
+    }
   } else {
     endpoints.push({
       ...REQUIRED_ENDPOINTS[1],
@@ -219,20 +240,34 @@ export async function runApiContractDiagnostic(): Promise<ApiContractDiagnostic>
   }
 
   // Test GET /servers
-  const serversResult = await listServers();
-  endpoints.push({
-    endpoint: '/servers',
-    method: 'GET',
-    description: 'Liste tous les serveurs',
-    required: true,
-    status: serversResult.success ? 'available' : 
-            serversResult.statusCode === 404 ? 'missing' : 'error',
-    lastTestedAt: new Date(),
-    errorMessage: serversResult.error,
-  });
+  try {
+    const serversResult = await listServers();
+    endpoints.push({
+      endpoint: '/servers',
+      method: 'GET',
+      description: 'Liste tous les serveurs',
+      required: true,
+      status: serversResult.success ? 'available' : 
+              serversResult.statusCode === 404 ? 'missing' : 'error',
+      lastTestedAt: new Date(),
+      errorMessage: serversResult.success ? undefined :
+                    serversResult.statusCode === 404 ? 'Endpoint non implémenté (404)' : serversResult.error,
+    });
 
-  if (serversResult.success && serversResult.data?.length) {
-    sampleServer = serversResult.data[0];
+    if (serversResult.success && serversResult.data?.length) {
+      sampleServer = serversResult.data[0];
+    }
+  } catch (err) {
+    console.error('[ApiContractDiagnostic] GET /servers failed:', err);
+    endpoints.push({
+      endpoint: '/servers',
+      method: 'GET',
+      description: 'Liste tous les serveurs',
+      required: true,
+      status: 'error',
+      lastTestedAt: new Date(),
+      errorMessage: err instanceof Error ? err.message : 'Unknown error',
+    });
   }
 
   // Add remaining endpoints as untested (would require mutations to test)
