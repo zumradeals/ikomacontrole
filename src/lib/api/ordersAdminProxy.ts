@@ -364,3 +364,151 @@ export async function detachRunnerFromServer(_runnerId: string, serverId?: strin
   }
   return { success: false, error: 'Server ID required for detachment' };
 }
+
+// ============================================
+// Orders Operations (External API)
+// ============================================
+
+export interface CreateOrderInput {
+  serverId: string;
+  playbookKey: string;
+  action: string;
+  createdBy: string;
+  name?: string;
+  command?: string;
+  description?: string;
+  params?: Record<string, unknown>;
+}
+
+export interface ExternalOrder {
+  id: string;
+  serverId: string;
+  runnerId?: string;
+  playbookKey: string;
+  action: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  name?: string;
+  command?: string;
+  exitCode?: number;
+  stdoutTail?: string;
+  stderrTail?: string;
+  result?: Record<string, unknown>;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+function mapOrder(raw: any): ExternalOrder {
+  return {
+    id: raw.id,
+    serverId: raw.server_id ?? raw.serverId,
+    runnerId: raw.runner_id ?? raw.runnerId,
+    playbookKey: raw.playbook_key ?? raw.playbookKey,
+    action: raw.action,
+    status: raw.status,
+    name: raw.name,
+    command: raw.command,
+    exitCode: raw.exit_code ?? raw.exitCode,
+    stdoutTail: raw.stdout_tail ?? raw.stdoutTail,
+    stderrTail: raw.stderr_tail ?? raw.stderrTail,
+    result: raw.result,
+    createdAt: raw.created_at ?? raw.createdAt ?? new Date().toISOString(),
+    startedAt: raw.started_at ?? raw.startedAt,
+    completedAt: raw.completed_at ?? raw.completedAt,
+  };
+}
+
+/**
+ * Create an order via the external API.
+ * The external API requires: serverId, playbookKey, action, idempotencyKey, createdBy
+ */
+export async function createOrder(input: CreateOrderInput): Promise<ApiResponse<ExternalOrder>> {
+  // Generate idempotency key
+  const idempotencyKey = `${input.serverId}-${input.playbookKey}-${Date.now()}`;
+  
+  const response = await edgeFunctionRequest<any>({
+    method: 'POST',
+    path: '/orders',
+    body: {
+      serverId: input.serverId,
+      playbookKey: input.playbookKey,
+      action: input.action,
+      idempotencyKey,
+      createdBy: input.createdBy,
+      name: input.name,
+      command: input.command,
+      description: input.description,
+      params: input.params,
+    },
+  });
+
+  if (!response.success || !response.data) {
+    return { success: false, error: response.error };
+  }
+
+  // Handle nested response format { order: {...} }
+  const orderData = response.data.order || response.data;
+  return {
+    success: true,
+    data: mapOrder(orderData),
+  };
+}
+
+/**
+ * List orders from the external API for a specific server
+ */
+export async function listOrders(serverId?: string): Promise<ApiResponse<ExternalOrder[]>> {
+  const path = serverId ? `/orders?serverId=${serverId}` : '/orders';
+  
+  const response = await edgeFunctionRequest<any>({
+    method: 'GET',
+    path,
+  });
+
+  if (!response.success || !response.data) {
+    return { success: false, error: response.error };
+  }
+
+  // Handle both { orders: [...] } and direct array formats
+  const rawData = response.data;
+  const rawOrders = Array.isArray(rawData) 
+    ? rawData 
+    : Array.isArray(rawData?.orders) 
+      ? rawData.orders 
+      : [];
+
+  return {
+    success: true,
+    data: rawOrders.map(mapOrder),
+  };
+}
+
+/**
+ * Get a single order by ID from the external API
+ */
+export async function getOrder(orderId: string): Promise<ApiResponse<ExternalOrder>> {
+  const response = await edgeFunctionRequest<any>({
+    method: 'GET',
+    path: `/orders/${orderId}`,
+  });
+
+  if (!response.success || !response.data) {
+    return { success: false, error: response.error };
+  }
+
+  const orderData = response.data.order || response.data;
+  return {
+    success: true,
+    data: mapOrder(orderData),
+  };
+}
+
+/**
+ * Cancel an order via the external API
+ */
+export async function cancelOrder(orderId: string): Promise<ApiResponse<void>> {
+  return edgeFunctionRequest<void>({
+    method: 'DELETE',
+    path: `/orders/${orderId}`,
+  });
+}
