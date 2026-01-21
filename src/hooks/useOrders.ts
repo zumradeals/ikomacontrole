@@ -1,22 +1,26 @@
 /**
  * ORDERS HOOK
  * 
- * NOTE: Orders are created/stored in the local Supabase database and synced
- * with the runner-api Edge Function. This is intentional because:
- * 1. Orders are created by the control plane (this app)
- * 2. Runners poll the runner-api to claim orders
- * 3. Results are reported back and stored in Supabase
+ * ARCHITECTURE UPDATE (v2):
+ * Orders are now created via the EXTERNAL API (api.ikomadigit.com) because runners
+ * poll the external API for orders, not the local Supabase runner-api.
  * 
- * The local Supabase 'orders' table IS the source of truth for order state
- * because this control plane creates and manages orders.
+ * The external API schema requires:
+ * - serverId: UUID of the target server
+ * - playbookKey: identifier for the playbook (e.g., "system.autodiscover")
+ * - action: "run" | "install" | etc.
+ * - idempotencyKey: unique key to prevent duplicates
+ * - createdBy: identifier of the user/system creating the order
  * 
- * This is different from 'runners' where the external API is the source of truth.
+ * For backwards compatibility, we also write orders to the local Supabase table
+ * for real-time tracking via the PlaybookExecutionTracker component.
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { Json } from '@/integrations/supabase/types';
+import { createOrder as createExternalOrder, listOrders as listExternalOrders, cancelOrder as cancelExternalOrder } from '@/lib/api/ordersAdminProxy';
 
 export type OrderStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type OrderCategory = 'installation' | 'update' | 'security' | 'maintenance' | 'detection';
@@ -48,24 +52,35 @@ export interface Order {
 export interface CreateOrderInput {
   runner_id: string;
   server_id?: string | null;
-  /** @deprecated Use server_id instead */
-  infrastructure_id?: string | null;
   category: OrderCategory;
   name: string;
   description?: string;
   command: string;
+  playbook_key?: string;
+  /** @deprecated Use server_id instead */
+  infrastructure_id?: string | null;
+}
+
+// Map category to action for external API
+function categoryToAction(category: OrderCategory): string {
+  switch (category) {
+    case 'installation': return 'install';
+    case 'update': return 'update';
+    case 'security': return 'security';
+    case 'maintenance': return 'maintenance';
+    case 'detection': return 'detect';
+    default: return 'run';
+  }
 }
 
 /**
- * Fetch orders from local Supabase.
- * Orders are managed locally because this control plane creates them.
- * 
- * NOTE: This uses Supabase directly because orders originate from this app.
+ * Fetch orders from external API and merge with local Supabase for real-time updates.
  */
-export function useOrders(runnerId?: string) {
+export function useOrders(runnerId?: string, serverId?: string) {
   return useQuery({
-    queryKey: ['orders', runnerId],
+    queryKey: ['orders', runnerId, serverId],
     queryFn: async () => {
+      // Fetch from local Supabase for real-time tracking
       let query = supabase
         .from('orders')
         .select('*')
@@ -75,27 +90,127 @@ export function useOrders(runnerId?: string) {
         query = query.eq('runner_id', runnerId);
       }
 
-      const { data, error } = await query;
-      if (error) {
-        console.error('Error fetching orders:', error);
-        throw error;
+      const { data: localData, error: localError } = await query;
+      
+      if (localError) {
+        console.error('Error fetching local orders:', localError);
       }
-      return data as Order[];
+
+      // Also try to fetch from external API for status sync
+      if (serverId) {
+        try {
+          const externalResult = await listExternalOrders(serverId);
+          if (externalResult.success && externalResult.data) {
+            // Merge external status updates into local data
+            const externalMap = new Map(externalResult.data.map(o => [o.id, o]));
+            
+            // Update local orders with external status if newer
+            for (const localOrder of (localData || [])) {
+              const external = externalMap.get(localOrder.id);
+              if (external && external.status !== localOrder.status) {
+                // Update local order status from external
+                await supabase
+                  .from('orders')
+                  .update({
+                    status: external.status,
+                    exit_code: external.exitCode,
+                    stdout_tail: external.stdoutTail,
+                    stderr_tail: external.stderrTail,
+                    completed_at: external.completedAt,
+                    started_at: external.startedAt,
+                    result: external.result as Json,
+                  })
+                  .eq('id', localOrder.id);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Could not sync with external API:', err);
+        }
+      }
+
+      return (localData || []) as Order[];
     },
-    enabled: !!runnerId,
+    enabled: !!runnerId || !!serverId,
+    refetchInterval: 5000, // Poll every 5 seconds for updates
   });
 }
 
 /**
- * Create a new order in local Supabase.
- * The runner will pick this up via the runner-api Edge Function.
+ * Create a new order via the EXTERNAL API.
+ * Also creates a local copy for real-time tracking.
  */
 export function useCreateOrder() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (input: CreateOrderInput) => {
-      // Store server_id in meta field for now, infrastructure_id is kept for backwards compatibility
+      const playbookKey = input.playbook_key || `${input.category}.custom`;
+      const action = categoryToAction(input.category);
+      const serverId = input.server_id || input.infrastructure_id;
+      
+      console.log('[useCreateOrder] Creating order:', {
+        serverId,
+        playbookKey,
+        action,
+        name: input.name,
+        hasServerId: !!serverId,
+      });
+
+      // If we have a server_id, create via external API
+      if (serverId) {
+        try {
+          const externalResult = await createExternalOrder({
+            serverId,
+            playbookKey,
+            action,
+            createdBy: 'dashboard',
+            name: input.name,
+            command: input.command,
+            description: input.description,
+          });
+
+          if (externalResult.success && externalResult.data) {
+            console.log('[useCreateOrder] External order created:', externalResult.data);
+
+            // Also create a local copy for real-time tracking via Supabase Realtime
+            const meta = { 
+              server_id: serverId,
+              external_id: externalResult.data.id,
+              playbook_key: playbookKey,
+            };
+            
+            const { data: localOrder, error: localError } = await supabase
+              .from('orders')
+              .insert({
+                id: externalResult.data.id,
+                runner_id: input.runner_id,
+                infrastructure_id: input.infrastructure_id || null,
+                category: input.category,
+                name: input.name,
+                description: input.description || null,
+                command: input.command,
+                status: 'pending',
+                meta,
+              })
+              .select()
+              .single();
+
+            if (localError) {
+              console.warn('[useCreateOrder] Local insert failed (may already exist):', localError);
+            }
+
+            return localOrder || externalResult.data;
+          }
+          
+          // If external API failed, log and fall through to local-only creation
+          console.warn('[useCreateOrder] External API failed, falling back to local:', externalResult.error);
+        } catch (err) {
+          console.warn('[useCreateOrder] External API error, falling back to local:', err);
+        }
+      }
+
+      // Fallback: Create locally only (for backwards compatibility or when external API unavailable)
       const meta = input.server_id ? { server_id: input.server_id } : {};
       
       const { data, error } = await supabase
@@ -121,12 +236,14 @@ export function useCreateOrder() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['orders', variables.runner_id] });
+      queryClient.invalidateQueries({ queryKey: ['orders', undefined, variables.server_id] });
       toast({
         title: 'Ordre créé',
         description: `L'ordre "${variables.name}" a été envoyé au runner.`,
       });
     },
     onError: (error: Error) => {
+      console.error('[useCreateOrder] Error:', error);
       toast({
         title: 'Erreur',
         description: error.message,
@@ -144,6 +261,14 @@ export function useCancelOrder() {
 
   return useMutation({
     mutationFn: async ({ orderId, runnerId }: { orderId: string; runnerId: string }) => {
+      // Try to cancel on external API first
+      try {
+        await cancelExternalOrder(orderId);
+      } catch (err) {
+        console.warn('[useCancelOrder] External cancel failed:', err);
+      }
+
+      // Also update local status
       const { error } = await supabase
         .from('orders')
         .update({ status: 'cancelled' })
