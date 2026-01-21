@@ -1,8 +1,10 @@
 /**
- * Orders Admin Proxy Client (BFF Version)
+ * Orders Admin Proxy Client
  * 
- * All calls now go through the local BFF at /api/*
+ * All calls go through the Supabase Edge Function admin-proxy
  */
+
+import { supabase } from '@/integrations/supabase/client';
 
 // ============================================
 // Types
@@ -92,7 +94,7 @@ export function clearProxyLogs(): void {
 }
 
 // ============================================
-// Core BFF Function
+// Core Edge Function Proxy
 // ============================================
 
 interface ProxyRequest {
@@ -101,60 +103,49 @@ interface ProxyRequest {
   body?: Record<string, unknown>;
 }
 
-async function bffRequest<T = unknown>(request: ProxyRequest): Promise<ApiResponse<T>> {
+async function edgeFunctionRequest<T = unknown>(request: ProxyRequest): Promise<ApiResponse<T>> {
   const startTime = Date.now();
-  const url = `/api${request.path}`;
   
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    
-    // Find the supabase auth token in localStorage
-    const authKey = Object.keys(localStorage).find(key => key.endsWith('-auth-token'));
-    if (authKey) {
-      const authDataStr = localStorage.getItem(authKey);
-      if (authDataStr) {
-        try {
-          const authData = JSON.parse(authDataStr);
-          if (authData.access_token) {
-            headers['Authorization'] = `Bearer ${authData.access_token}`;
-          }
-        } catch (e) {
-          console.error('Error parsing auth token', e);
-        }
-      }
-    }
-
-    const response = await fetch(url, {
-      method: request.method,
-      headers,
-      body: request.body ? JSON.stringify(request.body) : undefined,
+    const { data, error } = await supabase.functions.invoke('admin-proxy', {
+      body: {
+        method: request.method,
+        path: request.path,
+        body: request.body,
+      },
     });
 
     const duration = Date.now() - startTime;
-    const data = await response.json().catch(() => null);
 
-    // Enhanced logging for BFF diagnostic
+    // Enhanced logging for diagnostic
     const logEntry: Omit<ProxyLogEntry, 'timestamp'> = {
       action: `${request.method} ${request.path}`,
       endpoint: request.path,
       method: request.method,
-      statusCode: response.status,
-      success: response.ok,
+      statusCode: error ? 500 : 200,
+      success: !error,
       duration,
       proxy_target: data?.proxy_target,
       proxy_status: data?.proxy_status,
-      proxy_error: data?.proxy_error || data?.error || data?.message,
+      proxy_error: data?.proxy_error || data?.error || error?.message,
     };
 
-    if (!response.ok) {
-      const errorMsg = data?.error || data?.message || `HTTP ${response.status}`;
-      addLog({ ...logEntry, error: errorMsg });
+    if (error) {
+      addLog({ ...logEntry, error: error.message });
       return { 
         success: false, 
-        error: errorMsg, 
-        statusCode: response.status 
+        error: error.message, 
+        statusCode: 500 
+      };
+    }
+
+    // Check if the response itself indicates an error
+    if (data?.error) {
+      addLog({ ...logEntry, success: false, error: data.error });
+      return {
+        success: false,
+        error: data.error,
+        statusCode: data.proxy_status || 400,
       };
     }
 
@@ -221,7 +212,7 @@ export function mapServer(raw: any): ProxyServer {
 // ============================================
 
 export async function listRunners(): Promise<ApiResponse<ProxyRunner[]>> {
-  const response = await bffRequest<any>({
+  const response = await edgeFunctionRequest<any>({
     method: 'GET',
     path: '/runners',
   });
@@ -260,7 +251,7 @@ export async function getRunnerById(id: string): Promise<ApiResponse<ProxyRunner
 }
 
 export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
-  const response = await bffRequest<any>({
+  const response = await edgeFunctionRequest<any>({
     method: 'GET',
     path: '/servers',
   });
@@ -284,7 +275,7 @@ export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
 }
 
 export async function createServer(name: string, baseUrl?: string, runnerId?: string | null): Promise<ApiResponse<ProxyServer>> {
-  const response = await bffRequest<any>({
+  const response = await edgeFunctionRequest<any>({
     method: 'POST',
     path: '/servers',
     body: { name, baseUrl, runnerId },
@@ -301,7 +292,7 @@ export async function createServer(name: string, baseUrl?: string, runnerId?: st
 }
 
 export async function updateServerRunner(serverId: string, runnerId: string | null): Promise<ApiResponse<void>> {
-  return bffRequest<void>({
+  return edgeFunctionRequest<void>({
     method: 'PATCH',
     path: `/servers/${serverId}`,
     body: { runnerId },
@@ -309,7 +300,7 @@ export async function updateServerRunner(serverId: string, runnerId: string | nu
 }
 
 export async function updateServer(serverId: string, updates: { name?: string; host?: string }): Promise<ApiResponse<ProxyServer>> {
-  const response = await bffRequest<any>({
+  const response = await edgeFunctionRequest<any>({
     method: 'PATCH',
     path: `/servers/${serverId}`,
     body: updates,
@@ -326,21 +317,21 @@ export async function updateServer(serverId: string, updates: { name?: string; h
 }
 
 export async function deleteServer(serverId: string): Promise<ApiResponse<void>> {
-  return bffRequest<void>({
+  return edgeFunctionRequest<void>({
     method: 'DELETE',
     path: `/servers/${serverId}`,
   });
 }
 
 export async function deleteRunner(runnerId: string): Promise<ApiResponse<void>> {
-  return bffRequest<void>({
+  return edgeFunctionRequest<void>({
     method: 'DELETE',
     path: `/runners/${runnerId}`,
   });
 }
 
 export async function createRunner(name: string, infrastructureId?: string): Promise<ApiResponse<CreateRunnerResult>> {
-  return bffRequest<CreateRunnerResult>({
+  return edgeFunctionRequest<CreateRunnerResult>({
     method: 'POST',
     path: '/runners',
     body: { name, infrastructureId },
@@ -348,7 +339,7 @@ export async function createRunner(name: string, infrastructureId?: string): Pro
 }
 
 export async function resetRunnerToken(runnerId: string): Promise<ApiResponse<{ token: string }>> {
-  return bffRequest<{ token: string }>({
+  return edgeFunctionRequest<{ token: string }>({
     method: 'POST',
     path: `/runners/${runnerId}/token/reset`,
     body: {},
@@ -356,7 +347,7 @@ export async function resetRunnerToken(runnerId: string): Promise<ApiResponse<{ 
 }
 
 export async function attachRunnerToServer(serverId: string, runnerId: string): Promise<ApiResponse<{ success: boolean; message?: string }>> {
-  return bffRequest<any>({
+  return edgeFunctionRequest<any>({
     method: 'PATCH',
     path: `/servers/${serverId}`,
     body: { runnerId },
@@ -365,7 +356,7 @@ export async function attachRunnerToServer(serverId: string, runnerId: string): 
 
 export async function detachRunnerFromServer(_runnerId: string, serverId?: string): Promise<ApiResponse<{ success: boolean; message?: string }>> {
   if (serverId) {
-    return bffRequest<any>({
+    return edgeFunctionRequest<any>({
       method: 'PATCH',
       path: `/servers/${serverId}`,
       body: { runnerId: null },
