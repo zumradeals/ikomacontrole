@@ -389,13 +389,6 @@ export type Database = {
             referencedRelation: "infrastructures"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "orders_runner_id_fkey"
-            columns: ["runner_id"]
-            isOneToOne: false
-            referencedRelation: "runners"
-            referencedColumns: ["id"]
-          },
         ]
       }
       platform_instances: {
