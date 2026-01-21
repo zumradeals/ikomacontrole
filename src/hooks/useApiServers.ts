@@ -42,7 +42,6 @@ export function useApiServers() {
     queryFn: async (): Promise<ProxyServer[]> => {
       const result = await listServers();
       if (!result.success) {
-        // API might not support /servers yet - return empty
         console.warn('[useApiServers] API /servers not available:', result.error);
         return [];
       }
@@ -63,13 +62,62 @@ export function useApiRunners() {
     queryFn: async (): Promise<ProxyRunner[]> => {
       const result = await listRunners();
       if (!result.success) {
-        throw new Error(result.error || 'Failed to fetch runners');
+        console.warn('[useApiRunners] API /runners not available:', result.error);
+        return [];
       }
       return result.data || [];
     },
     refetchInterval: 15000,
     staleTime: 10000,
   });
+}
+
+// ============================================
+// Enriched Server Hook (resolves runner info locally)
+// ============================================
+
+export interface EnrichedServer extends ProxyServer {
+  runnerName: string | null;
+  runnerStatus: string | null;
+}
+
+/**
+ * Fetch servers and enrich them with runner info from the runners list.
+ * This avoids calling GET /runners/:id (not supported).
+ */
+export function useEnrichedServers() {
+  const serversQuery = useApiServers();
+  const runnersQuery = useApiRunners();
+
+  // Build a map for O(1) runner lookup
+  const runnersById = new Map<string, ProxyRunner>();
+  if (runnersQuery.data) {
+    runnersQuery.data.forEach(r => runnersById.set(r.id, r));
+  }
+
+  // Enrich servers with runner info
+  const enrichedServers: EnrichedServer[] = (serversQuery.data || []).map(server => {
+    const runner = server.runnerId ? runnersById.get(server.runnerId) : null;
+    return {
+      ...server,
+      runnerName: runner?.name ?? null,
+      runnerStatus: runner?.status ?? null,
+    };
+  });
+
+  return {
+    data: enrichedServers,
+    servers: serversQuery.data || [],
+    runners: runnersQuery.data || [],
+    runnersById,
+    isLoading: serversQuery.isLoading || runnersQuery.isLoading,
+    isError: serversQuery.isError || runnersQuery.isError,
+    error: serversQuery.error || runnersQuery.error,
+    refetch: () => {
+      serversQuery.refetch();
+      runnersQuery.refetch();
+    },
+  };
 }
 
 /**
