@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Server, Plus, RefreshCw, AlertCircle, Activity, Link2, Link2Off, Trash2, MoreVertical } from 'lucide-react';
+import { Server, Plus, RefreshCw, AlertCircle, Activity, Link2, Link2Off, MoreVertical, Eye, Pencil, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,14 +23,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { ServerForm } from '@/components/servers/ServerForm';
+import { ServerEditForm } from '@/components/servers/ServerEditForm';
+import { ServerDetails } from '@/components/servers/ServerDetails';
 import { ServerApiDiagnostic } from '@/components/servers/ServerApiDiagnostic';
 import { cn } from '@/lib/utils';
 import {
@@ -38,8 +33,8 @@ import {
   useApiCreateServer,
   useApiDeleteServer,
   useApiUpdateServerRunner,
+  useApiUpdateServer,
   type ProxyServer,
-  type ProxyRunner,
 } from '@/hooks/useApiServers';
 
 const Servers = () => {
@@ -55,8 +50,11 @@ const Servers = () => {
   const createServer = useApiCreateServer();
   const deleteServer = useApiDeleteServer();
   const updateServerRunner = useApiUpdateServerRunner();
+  const updateServer = useApiUpdateServer();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingServer, setEditingServer] = useState<ProxyServer | null>(null);
+  const [viewingServer, setViewingServer] = useState<ProxyServer | null>(null);
   const [deletingServer, setDeletingServer] = useState<ProxyServer | null>(null);
 
   const handleCreate = () => setIsFormOpen(true);
@@ -66,10 +64,30 @@ const Servers = () => {
     setIsFormOpen(false);
   };
 
+  const handleEdit = (server: ProxyServer) => {
+    setEditingServer(server);
+  };
+
+  const handleEditSubmit = async (data: { name: string; host?: string }) => {
+    if (editingServer) {
+      await updateServer.mutateAsync({
+        serverId: editingServer.id,
+        name: data.name,
+        host: data.host,
+      });
+      setEditingServer(null);
+      // If we're viewing this server, update the view
+      if (viewingServer?.id === editingServer.id) {
+        setViewingServer(null);
+      }
+    }
+  };
+
   const handleDelete = async () => {
     if (deletingServer) {
       await deleteServer.mutateAsync(deletingServer.id);
       setDeletingServer(null);
+      setViewingServer(null);
     }
   };
 
@@ -82,17 +100,59 @@ const Servers = () => {
     return runnersById.get(server.runnerId) || null;
   };
 
-  // Sort runners: ONLINE first
-  const sortedRunners = [...runners].sort((a, b) => {
-    if (a.status === 'ONLINE' && b.status !== 'ONLINE') return -1;
-    if (a.status !== 'ONLINE' && b.status === 'ONLINE') return 1;
-    return a.name.localeCompare(b.name);
-  });
-
   // Stats
   const totalServers = enrichedServers?.length || 0;
   const associatedCount = enrichedServers?.filter(s => s.runnerId).length || 0;
   const onlineRunners = runners.filter(r => r.status === 'ONLINE').length;
+
+  // If viewing details
+  if (viewingServer) {
+    const freshServer = enrichedServers?.find(s => s.id === viewingServer.id) || viewingServer;
+    return (
+      <>
+        <ServerDetails
+          server={freshServer}
+          runner={getRunnerForServer(freshServer)}
+          runners={runners}
+          onBack={() => setViewingServer(null)}
+          onEdit={() => handleEdit(freshServer)}
+          onDelete={() => setDeletingServer(freshServer)}
+          onRunnerChange={(runnerId) => handleRunnerChange(freshServer.id, runnerId)}
+          isUpdating={updateServerRunner.isPending}
+        />
+
+        {/* Edit Form Dialog */}
+        <ServerEditForm
+          open={!!editingServer}
+          onOpenChange={(open) => !open && setEditingServer(null)}
+          server={editingServer}
+          onSubmit={handleEditSubmit}
+          isLoading={updateServer.isPending}
+        />
+
+        {/* Delete Confirmation */}
+        <AlertDialog open={!!deletingServer} onOpenChange={(open) => !open && setDeletingServer(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Supprimer le serveur ?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Cette action est irréversible. Le serveur "{deletingServer?.name}" sera supprimé définitivement.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Annuler</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={handleDelete} 
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Supprimer
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -210,7 +270,11 @@ const Servers = () => {
               const runnerStatus = runner?.status || server.runnerStatus;
 
               return (
-                <Card key={server.id} className="glass-panel hover:border-primary/30 transition-all group">
+                <Card 
+                  key={server.id} 
+                  className="glass-panel hover:border-primary/30 transition-all group cursor-pointer"
+                  onClick={() => setViewingServer(server)}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
@@ -228,7 +292,7 @@ const Servers = () => {
                       </div>
 
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                           <Button 
                             variant="ghost" 
                             size="icon" 
@@ -238,9 +302,18 @@ const Servers = () => {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setViewingServer(server); }}>
+                            <Eye className="w-4 h-4 mr-2" />
+                            Voir détails
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleEdit(server); }}>
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Modifier
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem 
                             className="text-destructive focus:text-destructive"
-                            onClick={() => setDeletingServer(server)}
+                            onClick={(e) => { e.stopPropagation(); setDeletingServer(server); }}
                           >
                             <Trash2 className="w-4 h-4 mr-2" />
                             Supprimer
@@ -250,7 +323,7 @@ const Servers = () => {
                     </div>
                   </CardHeader>
 
-                  <CardContent className="space-y-4">
+                  <CardContent className="space-y-3">
                     {/* Status Badges */}
                     <div className="flex items-center gap-2 flex-wrap">
                       <Badge 
@@ -285,47 +358,10 @@ const Servers = () => {
                       )}
                     </div>
 
-                    {/* Runner Selector */}
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        Agent associé
-                      </label>
-                      <Select
-                        value={server.runnerId || '__none__'}
-                        onValueChange={(value) => handleRunnerChange(server.id, value === '__none__' ? null : value)}
-                        disabled={updateServerRunner.isPending}
-                      >
-                        <SelectTrigger className="w-full h-9 text-sm">
-                          <SelectValue placeholder="Sélectionner un agent..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">
-                            <span className="text-muted-foreground">Aucun (dissocier)</span>
-                          </SelectItem>
-                          {sortedRunners.map((r) => (
-                            <SelectItem key={r.id} value={r.id}>
-                              <div className="flex items-center gap-2">
-                                <span className={cn(
-                                  'w-2 h-2 rounded-full',
-                                  r.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-muted-foreground'
-                                )} />
-                                <span>{r.name}</span>
-                                <span className="text-xs text-muted-foreground">
-                                  ({r.status === 'ONLINE' ? 'En ligne' : 'Hors ligne'})
-                                </span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Server ID (subtle) */}
-                    <div className="pt-2 border-t border-border/30">
-                      <p className="text-[10px] text-muted-foreground/60 font-mono truncate">
-                        ID: {server.id}
-                      </p>
-                    </div>
+                    {/* Quick info */}
+                    <p className="text-xs text-muted-foreground">
+                      Cliquez pour voir les détails et l'historique des commandes
+                    </p>
                   </CardContent>
                 </Card>
               );
@@ -359,6 +395,15 @@ const Servers = () => {
         runners={runners}
         onSubmit={handleSubmit}
         isLoading={createServer.isPending}
+      />
+
+      {/* Edit Form Dialog */}
+      <ServerEditForm
+        open={!!editingServer}
+        onOpenChange={(open) => !open && setEditingServer(null)}
+        server={editingServer}
+        onSubmit={handleEditSubmit}
+        isLoading={updateServer.isPending}
       />
 
       {/* Delete Confirmation */}

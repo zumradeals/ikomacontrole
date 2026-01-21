@@ -12,6 +12,7 @@ import {
   listServers,
   createServer,
   updateServerRunner,
+  updateServer,
   deleteServer,
   listRunners,
   type ProxyServer,
@@ -193,6 +194,46 @@ export function useApiUpdateServerRunner() {
     onError: (error: Error) => {
       toast({
         title: 'Erreur association',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+}
+
+/**
+ * Update server info via PATCH /servers/:id.
+ * Body: { name?: string; host?: string }
+ */
+export function useApiUpdateServer() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ 
+      serverId, 
+      name,
+      host,
+    }: { 
+      serverId: string; 
+      name?: string;
+      host?: string;
+    }): Promise<ProxyServer> => {
+      const result = await updateServer(serverId, { name, host });
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Failed to update server');
+      }
+      return result.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: apiServerQueryKeys.servers });
+      toast({
+        title: 'Serveur mis à jour',
+        description: `${data.name} modifié avec succès.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Erreur modification',
         description: error.message,
         variant: 'destructive',
       });
