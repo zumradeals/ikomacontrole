@@ -18,8 +18,7 @@ import { ServerCard } from '@/components/servers/ServerCard';
 import { ServerForm } from '@/components/servers/ServerForm';
 import { ServerApiDiagnostic } from '@/components/servers/ServerApiDiagnostic';
 import {
-  useApiServers,
-  useApiRunners,
+  useEnrichedServers,
   useApiCreateServer,
   useApiDeleteServer,
   useApiUpdateServerRunner,
@@ -27,8 +26,16 @@ import {
 } from '@/hooks/useApiServers';
 
 const Servers = () => {
-  const { data: servers, isLoading, error, refetch } = useApiServers();
-  const { data: runners } = useApiRunners();
+  // Single hook that fetches servers + runners and enriches server data
+  const { 
+    data: enrichedServers, 
+    runners, 
+    runnersById,
+    isLoading, 
+    error, 
+    refetch 
+  } = useEnrichedServers();
+  
   const createServer = useApiCreateServer();
   const deleteServer = useApiDeleteServer();
   const updateServerRunner = useApiUpdateServerRunner();
@@ -56,10 +63,10 @@ const Servers = () => {
     await updateServerRunner.mutateAsync({ serverId, runnerId });
   };
 
-  // Find runner details for display
+  // Get runner object for a server (from our pre-built map)
   const getRunnerForServer = (server: ProxyServer) => {
-    if (!server.runnerId || !runners) return null;
-    return runners.find(r => r.id === server.runnerId) || null;
+    if (!server.runnerId) return null;
+    return runnersById.get(server.runnerId) || null;
   };
 
   if (isLoading) {
@@ -124,21 +131,21 @@ const Servers = () => {
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Serveurs via API
         </h2>
-        {servers && servers.length > 0 && (
+        {enrichedServers && enrichedServers.length > 0 && (
           <span className="text-xs text-muted-foreground">
-            {servers.length} serveur{servers.length > 1 ? 's' : ''}
+            {enrichedServers.length} serveur{enrichedServers.length > 1 ? 's' : ''} • {runners.length} runners
           </span>
         )}
       </div>
 
-      {servers && servers.length > 0 ? (
+      {enrichedServers && enrichedServers.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {servers.map(server => (
+          {enrichedServers.map(server => (
             <ServerCard
               key={server.id}
               server={server}
               runner={getRunnerForServer(server)}
-              runners={runners || []}
+              runners={runners}
               onRunnerChange={(runnerId) => handleRunnerChange(server.id, runnerId)}
               onDelete={() => setDeletingServer(server)}
               isUpdating={updateServerRunner.isPending}
@@ -165,7 +172,7 @@ const Servers = () => {
       <ServerForm
         open={isFormOpen}
         onOpenChange={setIsFormOpen}
-        runners={runners || []}
+        runners={runners}
         onSubmit={handleSubmit}
         isLoading={createServer.isPending}
       />

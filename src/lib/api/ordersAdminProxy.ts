@@ -221,7 +221,7 @@ export function mapServer(raw: any): ProxyServer {
 // ============================================
 
 export async function listRunners(): Promise<ApiResponse<ProxyRunner[]>> {
-  const response = await bffRequest<any[]>({
+  const response = await bffRequest<any>({
     method: 'GET',
     path: '/runners',
   });
@@ -230,7 +230,13 @@ export async function listRunners(): Promise<ApiResponse<ProxyRunner[]>> {
     return { success: false, error: response.error };
   }
 
-  const rawRunners = Array.isArray(response.data) ? response.data : [];
+  // Handle both { runners: [...] } and direct array formats
+  const rawData = response.data;
+  const rawRunners = Array.isArray(rawData) 
+    ? rawData 
+    : Array.isArray(rawData?.runners) 
+      ? rawData.runners 
+      : [];
   
   return {
     success: true,
@@ -254,7 +260,7 @@ export async function getRunnerById(id: string): Promise<ApiResponse<ProxyRunner
 }
 
 export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
-  const response = await bffRequest<any[]>({
+  const response = await bffRequest<any>({
     method: 'GET',
     path: '/servers',
   });
@@ -263,7 +269,13 @@ export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
     return { success: false, error: response.error };
   }
 
-  const rawServers = Array.isArray(response.data) ? response.data : [];
+  // Handle both { servers: [...] } and direct array formats
+  const rawData = response.data;
+  const rawServers = Array.isArray(rawData) 
+    ? rawData 
+    : Array.isArray(rawData?.servers) 
+      ? rawData.servers 
+      : [];
 
   return {
     success: true,
@@ -334,7 +346,7 @@ export async function attachRunnerToServer(serverId: string, runnerId: string): 
   });
 }
 
-export async function detachRunnerFromServer(runnerId: string, serverId?: string): Promise<ApiResponse<{ success: boolean; message?: string }>> {
+export async function detachRunnerFromServer(_runnerId: string, serverId?: string): Promise<ApiResponse<{ success: boolean; message?: string }>> {
   if (serverId) {
     return bffRequest<any>({
       method: 'PATCH',
