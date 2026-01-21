@@ -183,18 +183,17 @@ export function CapabilitiesDetailView({
   
   // Filter capabilities by search
   const filteredGroups: CapabilityGroups = searchQuery
-    ? Object.fromEntries(
-        Object.entries(groupedCaps)
-          .map(([group, items]) => [
-            group,
-            items.filter(
-              item =>
-                item.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                getCapabilityLabel(item.key).toLowerCase().includes(searchQuery.toLowerCase())
-            ),
-          ] as [string, CapabilityItem[]])
-          .filter(([, items]) => (items as CapabilityItem[]).length > 0)
-      ) as CapabilityGroups
+    ? Object.entries(groupedCaps).reduce<CapabilityGroups>((acc, [group, items]) => {
+        const filtered = items.filter(
+          item =>
+            item.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            getCapabilityLabel(item.key).toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        if (filtered.length > 0) {
+          acc[group] = filtered;
+        }
+        return acc;
+      }, {})
     : groupedCaps;
   
   const totalCapabilities = Object.values(parsedCaps).filter(Boolean).length;
