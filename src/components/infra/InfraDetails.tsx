@@ -22,7 +22,8 @@ import {
   ArrowRight,
   RefreshCw,
   Plus,
-  Unlink
+  Unlink,
+  Eye
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -52,6 +53,7 @@ import { useSettings } from '@/hooks/useSettings';
 import { useInstalledCapabilities, GROUP_DISPLAY } from '@/hooks/useInstalledCapabilities';
 import { ReinstallScript } from '@/components/runner/ReinstallScript';
 import { RunnerLogs } from '@/components/runner/RunnerLogs';
+import { CapabilitiesDetailDialog } from '@/components/runner/CapabilitiesDetailDialog';
 import { OrdersHistory } from './OrdersHistory';
 import { ServerDiagnostics } from './ServerDiagnostics';
 import { CreateRunnerDialog } from './CreateRunnerDialog';
@@ -194,7 +196,19 @@ function HealthDashboard({ runner, infrastructure }: { runner: ProxyRunner | nul
 }
 
 // Installed Software Badges
-function InstalledSoftware({ infrastructureId, runnerId }: { infrastructureId: string; runnerId?: string }) {
+function InstalledSoftware({ 
+  infrastructureId, 
+  runnerId, 
+  runnerName,
+  runnerCapabilities,
+  onViewDetails,
+}: { 
+  infrastructureId: string; 
+  runnerId?: string; 
+  runnerName?: string;
+  runnerCapabilities?: unknown;
+  onViewDetails?: () => void;
+}) {
   const { data, isLoading, refetch } = useInstalledCapabilities(infrastructureId, runnerId);
   
   if (isLoading) {
@@ -229,11 +243,17 @@ function InstalledSoftware({ infrastructureId, runnerId }: { infrastructureId: s
           )}
         </h2>
         <div className="flex items-center gap-2">
+          {runnerId && onViewDetails && (
+            <Button variant="outline" size="sm" onClick={onViewDetails}>
+              <Eye className="w-4 h-4 mr-1" />
+              Détails
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4" />
           </Button>
           <Button variant="outline" size="sm" asChild>
-            <Link to="/playbooks">
+            <Link to="/platform">
               Installer plus
               <ArrowRight className="w-4 h-4 ml-1" />
             </Link>
@@ -320,6 +340,7 @@ export function InfraDetails({ infrastructure, onBack, onEdit, onDelete }: Infra
   const [selectedRunner, setSelectedRunner] = useState<string>('');
   const [reinstallDialogOpen, setReinstallDialogOpen] = useState(false);
   const [createRunnerOpen, setCreateRunnerOpen] = useState(false);
+  const [capabilitiesDetailOpen, setCapabilitiesDetailOpen] = useState(false);
   const [selectedRunnerForReinstall, setSelectedRunnerForReinstall] = useState<ReturnType<typeof mapRunnerToLocal> | null>(null);
   
   // Fetch runners from API (source of truth)
@@ -419,7 +440,21 @@ export function InfraDetails({ infrastructure, onBack, onEdit, onDelete }: Infra
       <InstalledSoftware 
         infrastructureId={infrastructure.id} 
         runnerId={primaryRunner?.id}
+        runnerName={primaryRunner?.name}
+        runnerCapabilities={primaryRunner?.capabilities}
+        onViewDetails={() => setCapabilitiesDetailOpen(true)}
       />
+
+      {/* Capabilities Detail Dialog */}
+      {primaryRunner && (
+        <CapabilitiesDetailDialog
+          open={capabilitiesDetailOpen}
+          onOpenChange={setCapabilitiesDetailOpen}
+          runnerId={primaryRunner.id}
+          runnerName={primaryRunner.name}
+          capabilities={primaryRunner.capabilities}
+        />
+      )}
 
       {/* Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
