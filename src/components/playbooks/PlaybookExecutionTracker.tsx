@@ -3,19 +3,20 @@
  * 
  * Real-time visualization of running playbook/order executions.
  * Uses Supabase Realtime to show live progress updates.
+ * Automatically syncs capabilities after successful execution.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { 
   Loader2, 
   CheckCircle2, 
   XCircle, 
   Clock, 
-  Terminal,
   ChevronDown,
   ChevronUp,
-  Zap
+  Zap,
+  RefreshCw
 } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { Order, OrderStatus, useCancelOrder } from '@/hooks/useOrders';
+import { useAutoCapabilitySync } from '@/hooks/useCapabilitySync';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -229,6 +231,10 @@ export function PlaybookExecutionTracker({
 }: PlaybookExecutionTrackerProps) {
   const queryClient = useQueryClient();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { processCompletedOrder, isSyncing } = useAutoCapabilitySync();
+  
+  // Track which orders we've already processed for capability sync
+  const processedOrdersRef = useRef<Set<string>>(new Set());
 
   // Filter to active orders (pending/running) and recent completed/failed
   const activeOrders = useMemo(() => {
@@ -276,6 +282,26 @@ export function PlaybookExecutionTracker({
     }
   }, [activeOrders, expandedId]);
 
+  // Auto-sync capabilities when orders complete
+  useEffect(() => {
+    for (const order of orders) {
+      if (
+        order.status === 'completed' && 
+        !processedOrdersRef.current.has(order.id) &&
+        order.stdout_tail
+      ) {
+        processedOrdersRef.current.add(order.id);
+        processCompletedOrder(
+          runnerId,
+          order.id,
+          order.status,
+          order.stdout_tail,
+          order.result
+        );
+      }
+    }
+  }, [orders, runnerId, processCompletedOrder]);
+
   if (activeOrders.length === 0) {
     return null; // Don't show anything if no active orders
   }
@@ -290,8 +316,17 @@ export function PlaybookExecutionTracker({
         <div className="flex items-center gap-2">
           <Zap className="w-4 h-4 text-primary" />
           <h3 className="font-semibold text-sm">Exécution en cours</h3>
+          {isSyncing && (
+            <RefreshCw className="w-3 h-3 text-primary animate-spin" />
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {isSyncing && (
+            <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
+              <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+              Sync capacités
+            </Badge>
+          )}
           {runningCount > 0 && (
             <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/30">
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
