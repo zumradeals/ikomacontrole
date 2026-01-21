@@ -47,6 +47,8 @@ export interface Order {
 
 export interface CreateOrderInput {
   runner_id: string;
+  server_id?: string | null;
+  /** @deprecated Use server_id instead */
   infrastructure_id?: string | null;
   category: OrderCategory;
   name: string;
@@ -93,6 +95,9 @@ export function useCreateOrder() {
 
   return useMutation({
     mutationFn: async (input: CreateOrderInput) => {
+      // Store server_id in meta field for now, infrastructure_id is kept for backwards compatibility
+      const meta = input.server_id ? { server_id: input.server_id } : {};
+      
       const { data, error } = await supabase
         .from('orders')
         .insert({
@@ -103,6 +108,7 @@ export function useCreateOrder() {
           description: input.description || null,
           command: input.command,
           status: 'pending',
+          meta,
         })
         .select()
         .single();
