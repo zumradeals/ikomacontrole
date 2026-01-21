@@ -7,11 +7,13 @@
  * Source of truth:
  * - Servers & Runners: External API via admin-proxy
  * - Orders: Local Supabase (created here, polled by runners)
+ * - Capabilities: External API (stored on runner)
  */
 
 import { useMemo } from 'react';
-import { useEnrichedServers, EnrichedServer, ProxyRunner } from './useApiServers';
+import { useEnrichedServers, ProxyRunner } from './useApiServers';
 import { useOrders, Order } from './useOrders';
+import { parseRunnerCapabilities, RunnerCapabilities, hasCapability } from './useRunnerCapabilities';
 import { LucideIcon, Database, Zap, Globe, BarChart3 } from 'lucide-react';
 
 // Service status enum
@@ -175,6 +177,12 @@ export function usePlaybookServices(selectedServerId?: string) {
     return runnersById.get(selectedServer.runnerId);
   }, [selectedServer, runnersById]);
 
+  // Parse capabilities from runner (now from external API)
+  const capabilities = useMemo((): RunnerCapabilities => {
+    if (!associatedRunner) return {};
+    return parseRunnerCapabilities(associatedRunner.capabilities);
+  }, [associatedRunner]);
+
   // Get orders for this runner (from local Supabase)
   const { data: orders = [] } = useOrders(associatedRunner?.id);
 
@@ -198,7 +206,7 @@ export function usePlaybookServices(selectedServerId?: string) {
     };
   }, [selectedServer, associatedRunner]);
 
-  // Compute services with their status
+  // Compute services with their status (checking capabilities from API)
   const services = useMemo((): PlatformService[] => {
     return SERVICE_DEFINITIONS.map(def => {
       let status: ServiceStatus = 'unknown';
@@ -209,6 +217,14 @@ export function usePlaybookServices(selectedServerId?: string) {
         status = 'not_configured';
         statusLabel = 'Non configuré';
       } else {
+        // Check if prerequisites are met using capabilities from API
+        const prereqsMet = def.prerequisites.every(prereq => 
+          hasCapability(capabilities, prereq)
+        );
+
+        // Check if service is already installed
+        const isInstalled = hasCapability(capabilities, def.capabilities.verifies);
+
         // Find orders related to this service
         const serviceOrders = orders.filter(o => 
           def.playbooks.install.some(pb => o.description?.includes(`[${pb}]`)) ||
@@ -216,15 +232,18 @@ export function usePlaybookServices(selectedServerId?: string) {
         );
         lastOrder = serviceOrders[0];
 
-        if (lastOrder?.status === 'running' || lastOrder?.status === 'pending') {
+        if (isInstalled) {
+          status = 'installed';
+          statusLabel = 'Installé';
+        } else if (lastOrder?.status === 'running' || lastOrder?.status === 'pending') {
           status = 'installing';
           statusLabel = 'Installation en cours';
         } else if (lastOrder?.status === 'failed') {
           status = 'failed';
           statusLabel = 'Échec';
-        } else if (lastOrder?.status === 'completed') {
-          status = 'installed';
-          statusLabel = 'Installé';
+        } else if (!prereqsMet) {
+          status = 'precheck_failed';
+          statusLabel = 'Prérequis manquants';
         } else {
           status = 'ready_to_install';
           statusLabel = 'Prêt à installer';
@@ -238,7 +257,7 @@ export function usePlaybookServices(selectedServerId?: string) {
         lastOrder,
       };
     });
-  }, [gating, orders]);
+  }, [gating, orders, capabilities]);
 
   return {
     // Data
@@ -250,6 +269,7 @@ export function usePlaybookServices(selectedServerId?: string) {
     orders,
     services,
     gating,
+    capabilities,
     
     // Loading states
     isLoading,

@@ -128,13 +128,29 @@ serve(async (req) => {
             serverId: runner.server_id || runner.serverId,
             serverName: runner.server_name || runner.serverName,
             scopes: runner.scopes,
-            capabilities: runner.capabilities,
+            capabilities: runner.capabilities || {},
             hostInfo: runner.host_info || runner.hostInfo,
             createdAt: runner.created_at || runner.createdAt,
           }))
         : [];
       return new Response(
         JSON.stringify(runners),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    // For PATCH /runners/:id/capabilities, handle capability updates
+    if (path.match(/^\/runners\/[^/]+\/capabilities$/) && httpMethod === 'PATCH') {
+      console.info('Capabilities update response:', responseData);
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          capabilities: responseData?.capabilities || responseData,
+          ...baseResponse 
+        }),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
