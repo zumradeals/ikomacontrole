@@ -15,7 +15,8 @@ import {
   Server,
   Wifi,
   WifiOff,
-  Shield
+  Shield,
+  RefreshCw
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -31,7 +32,7 @@ import { PlaybookExecutionTracker } from '@/components/playbooks/PlaybookExecuti
 import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
 import { checkCapabilities, getCapabilityLabel } from '@/hooks/useRunnerCapabilities';
-import { PLAYBOOK_GROUPS, Playbook, PlaybookPrerequisite, ALL_PLAYBOOKS } from '@/lib/playbooks';
+import { PLAYBOOK_GROUPS, Playbook, PlaybookPrerequisite, ALL_PLAYBOOKS, getPlaybookById } from '@/lib/playbooks';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -185,6 +186,7 @@ const Playbooks = () => {
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
   const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
+  const [isAutoDiscovering, setIsAutoDiscovering] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -257,6 +259,46 @@ const Playbooks = () => {
       });
     } finally {
       setExecutingId(null);
+    }
+  };
+
+  // Quick auto-discovery function
+  const handleQuickAutoDiscovery = async () => {
+    if (!associatedRunner) {
+      toast({
+        title: 'Erreur',
+        description: 'Aucun agent associé à ce serveur',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const discoveryPlaybook = getPlaybookById('system.autodiscover');
+    if (!discoveryPlaybook) {
+      toast({
+        title: 'Erreur',
+        description: 'Playbook d\'auto-découverte non trouvé',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsAutoDiscovering(true);
+    try {
+      await createOrder.mutateAsync({
+        runner_id: associatedRunner.id,
+        server_id: selectedServerId,
+        category: 'detection',
+        name: discoveryPlaybook.name,
+        description: `[${discoveryPlaybook.id}] ${discoveryPlaybook.description}`,
+        command: discoveryPlaybook.command,
+      });
+      toast({
+        title: 'Auto-découverte lancée',
+        description: 'Détection des logiciels installés en cours...',
+      });
+    } finally {
+      setIsAutoDiscovering(false);
     }
   };
 
@@ -433,15 +475,26 @@ const Playbooks = () => {
               {/* Filters bar */}
               <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!isRunnerReady}
-                    onClick={() => setAutoDetectDialogOpen(true)}
-                  >
-                    <Scan className="w-4 h-4 mr-2" />
-                    Auto-détection
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="default"
+                        size="sm"
+                        disabled={!isRunnerReady || isAutoDiscovering}
+                        onClick={handleQuickAutoDiscovery}
+                      >
+                        {isAutoDiscovering ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                        )}
+                        Auto-découverte
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Détecte automatiquement Docker, Node.js, Git et autres logiciels installés
+                    </TooltipContent>
+                  </Tooltip>
                   
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

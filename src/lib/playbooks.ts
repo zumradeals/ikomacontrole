@@ -51,6 +51,190 @@ export interface Playbook {
 
 const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
+    id: 'system.autodiscover',
+    group: 'system',
+    name: 'Auto-découverte complète',
+    description: 'Détecte automatiquement tous les logiciels installés (Docker, Node, Git, etc.)',
+    level: 'simple',
+    risk: 'low',
+    duration: '~15s',
+    icon: Cpu,
+    prerequisites: [],
+    verifies: ['system.detected', 'docker.installed', 'node.installed', 'git.installed'],
+    command: `#!/bin/bash
+set -e
+
+echo "=== IKOMA Auto-Discovery ==="
+echo "Detecting installed software and capabilities..."
+echo ""
+
+# Initialize capabilities JSON
+declare -A CAPS
+
+# Function to add capability
+add_cap() {
+  CAPS["$1"]="$2"
+  echo "✓ $1: $2"
+}
+
+# System detection
+echo "--- System ---"
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "OS: $NAME $VERSION_ID"
+fi
+echo "Arch: $(uname -m)"
+echo "Kernel: $(uname -r)"
+add_cap "system.detected" "installed"
+
+# Docker
+echo ""
+echo "--- Docker ---"
+if command -v docker &>/dev/null; then
+  DOCKER_V=$(docker --version 2>/dev/null | grep -oP '\\d+\\.\\d+\\.\\d+' | head -1)
+  add_cap "docker.installed" "installed"
+  echo "Docker version: $DOCKER_V"
+  
+  if docker compose version &>/dev/null || docker-compose --version &>/dev/null; then
+    add_cap "docker.compose.installed" "installed"
+  fi
+else
+  echo "Docker: not installed"
+fi
+
+# Node.js
+echo ""
+echo "--- Node.js ---"
+if command -v node &>/dev/null; then
+  NODE_V=$(node --version 2>/dev/null)
+  add_cap "node.installed" "installed"
+  echo "Node.js version: $NODE_V"
+  
+  if command -v npm &>/dev/null; then
+    NPM_V=$(npm --version 2>/dev/null)
+    add_cap "npm.installed" "installed"
+    echo "npm version: $NPM_V"
+  fi
+  
+  if command -v pm2 &>/dev/null; then
+    add_cap "pm2.installed" "installed"
+    echo "PM2: installed"
+  fi
+else
+  echo "Node.js: not installed"
+fi
+
+# Git
+echo ""
+echo "--- Git ---"
+if command -v git &>/dev/null; then
+  GIT_V=$(git --version 2>/dev/null | grep -oP '\\d+\\.\\d+\\.\\d+')
+  add_cap "git.installed" "installed"
+  echo "Git version: $GIT_V"
+else
+  echo "Git: not installed"
+fi
+
+# Python
+echo ""
+echo "--- Python ---"
+if command -v python3 &>/dev/null; then
+  PY_V=$(python3 --version 2>/dev/null)
+  add_cap "python.installed" "installed"
+  echo "Python: $PY_V"
+elif command -v python &>/dev/null; then
+  PY_V=$(python --version 2>/dev/null)
+  add_cap "python.installed" "installed"
+  echo "Python: $PY_V"
+else
+  echo "Python: not installed"
+fi
+
+# Web Servers / Proxies
+echo ""
+echo "--- Web Servers ---"
+if command -v caddy &>/dev/null; then
+  add_cap "caddy.installed" "installed"
+  echo "Caddy: installed"
+fi
+
+if command -v nginx &>/dev/null; then
+  add_cap "nginx.installed" "installed"
+  echo "Nginx: installed"
+fi
+
+if command -v certbot &>/dev/null; then
+  add_cap "certbot.installed" "installed"
+  echo "Certbot: installed"
+fi
+
+# Databases
+echo ""
+echo "--- Databases ---"
+if command -v redis-cli &>/dev/null || docker ps 2>/dev/null | grep -q redis; then
+  add_cap "redis.installed" "installed"
+  echo "Redis: installed"
+fi
+
+if docker ps 2>/dev/null | grep -q supabase; then
+  add_cap "supabase.installed" "installed"
+  echo "Supabase: running"
+fi
+
+# Security
+echo ""
+echo "--- Security ---"
+if command -v fail2ban-client &>/dev/null; then
+  add_cap "fail2ban.installed" "installed"
+  echo "Fail2ban: installed"
+fi
+
+if command -v ufw &>/dev/null; then
+  UFW_STATUS=$(ufw status 2>/dev/null | head -1)
+  if echo "$UFW_STATUS" | grep -q "active"; then
+    add_cap "ufw.installed" "installed"
+    echo "UFW: active"
+  else
+    echo "UFW: installed but inactive"
+  fi
+fi
+
+# Monitoring
+echo ""
+echo "--- Monitoring ---"
+if systemctl is-active node_exporter &>/dev/null || pgrep -x node_exporter &>/dev/null; then
+  add_cap "node_exporter.installed" "installed"
+  echo "Node Exporter: running"
+fi
+
+if docker ps 2>/dev/null | grep -q prometheus; then
+  add_cap "prometheus.installed" "installed"
+  echo "Prometheus: running"
+fi
+
+# Output JSON for capability extraction
+echo ""
+echo "=== Capabilities JSON ==="
+echo "{"
+echo '  "capabilities": {'
+FIRST=1
+for key in "\${!CAPS[@]}"; do
+  if [ $FIRST -eq 1 ]; then
+    FIRST=0
+  else
+    echo ","
+  fi
+  printf '    "%s": "%s"' "$key" "\${CAPS[$key]}"
+done
+echo ""
+echo "  }"
+echo "}"
+
+echo ""
+echo "=== Discovery Complete ==="
+`,
+  },
+  {
     id: 'system.info',
     group: 'system',
     name: 'Collecter infos système',
