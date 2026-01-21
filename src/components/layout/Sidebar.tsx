@@ -31,10 +31,9 @@ interface NavItem {
 // Navigation items with French labels and expert mode flags
 const navItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/servers', label: 'Serveurs (API)', icon: Server },
-  { path: '/infra', label: 'Infra (local)', icon: HardDrive },
-  { path: '/runner', label: 'Agents', icon: Server },
-  { path: '/platform', label: 'Playbooks', icon: Terminal },
+  { path: '/servers', label: 'Serveurs', icon: Server },
+  { path: '/runner', label: 'Agents', icon: Terminal },
+  { path: '/platform', label: 'Playbooks', icon: HardDrive },
   { path: '/deployer', label: 'Déploiements', icon: Rocket, expertOnly: true },
   { path: '/gateway', label: 'Routage', icon: Network, expertOnly: true },
   { path: '/observability', label: 'Observabilité', icon: Eye, expertOnly: true },

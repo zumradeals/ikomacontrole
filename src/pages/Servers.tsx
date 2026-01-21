@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Server, Plus, RefreshCw, Info, AlertCircle } from 'lucide-react';
+import { Server, Plus, RefreshCw, AlertCircle, Activity, Link2, Link2Off, Trash2, MoreVertical } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,19 +16,33 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { ServerCard } from '@/components/servers/ServerCard';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { ServerForm } from '@/components/servers/ServerForm';
 import { ServerApiDiagnostic } from '@/components/servers/ServerApiDiagnostic';
+import { cn } from '@/lib/utils';
 import {
   useEnrichedServers,
   useApiCreateServer,
   useApiDeleteServer,
   useApiUpdateServerRunner,
   type ProxyServer,
+  type ProxyRunner,
 } from '@/hooks/useApiServers';
 
 const Servers = () => {
-  // Single hook that fetches servers + runners and enriches server data
   const { 
     data: enrichedServers, 
     runners, 
@@ -43,9 +59,7 @@ const Servers = () => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [deletingServer, setDeletingServer] = useState<ProxyServer | null>(null);
 
-  const handleCreate = () => {
-    setIsFormOpen(true);
-  };
+  const handleCreate = () => setIsFormOpen(true);
 
   const handleSubmit = async (data: { name: string; baseUrl?: string; runnerId?: string | null }) => {
     await createServer.mutateAsync(data);
@@ -63,23 +77,39 @@ const Servers = () => {
     await updateServerRunner.mutateAsync({ serverId, runnerId });
   };
 
-  // Get runner object for a server (from our pre-built map)
   const getRunnerForServer = (server: ProxyServer) => {
     if (!server.runnerId) return null;
     return runnersById.get(server.runnerId) || null;
   };
+
+  // Sort runners: ONLINE first
+  const sortedRunners = [...runners].sort((a, b) => {
+    if (a.status === 'ONLINE' && b.status !== 'ONLINE') return -1;
+    if (a.status !== 'ONLINE' && b.status === 'ONLINE') return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Stats
+  const totalServers = enrichedServers?.length || 0;
+  const associatedCount = enrichedServers?.filter(s => s.runnerId).length || 0;
+  const onlineRunners = runners.filter(r => r.status === 'ONLINE').length;
 
   if (isLoading) {
     return (
       <div className="space-y-6 animate-fade-in">
         <PageHeader
           title="Serveurs"
-          description="Gestion des serveurs et associations runners"
+          description="Gérez vos serveurs et leurs agents associés"
           icon={Server}
         />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[1, 2, 3].map(i => (
-            <Skeleton key={i} className="h-52 rounded-xl" />
+            <Skeleton key={i} className="h-24 rounded-xl" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {[1, 2, 3, 4].map(i => (
+            <Skeleton key={i} className="h-40 rounded-xl" />
           ))}
         </div>
       </div>
@@ -87,10 +117,10 @@ const Servers = () => {
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Serveurs"
-        description="Gestion des serveurs et associations runners (source: API Orders)"
+        description="Gérez vos serveurs et leurs agents associés"
         icon={Server}
         actions={
           <div className="flex items-center gap-2">
@@ -100,19 +130,56 @@ const Servers = () => {
             </Button>
             <Button size="sm" onClick={handleCreate}>
               <Plus className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Créer serveur</span>
+              <span className="hidden sm:inline">Nouveau serveur</span>
             </Button>
           </div>
         }
       />
 
-      <Alert className="glass-panel border-primary/20">
-        <Info className="w-4 h-4" />
-        <AlertDescription>
-          <strong>Module Serveurs (API-first) :</strong> Les serveurs et associations sont gérés via l'API Orders. 
-          L'association officielle est <code className="bg-muted px-1 rounded">servers.runnerId</code>.
-        </AlertDescription>
-      </Alert>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="glass-panel border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Serveurs</p>
+                <p className="text-2xl font-bold">{totalServers}</p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Server className="w-5 h-5 text-primary" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="glass-panel border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Associés</p>
+                <p className="text-2xl font-bold">{associatedCount}<span className="text-sm text-muted-foreground font-normal">/{totalServers}</span></p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <Link2 className="w-5 h-5 text-emerald-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="glass-panel border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Agents en ligne</p>
+                <p className="text-2xl font-bold text-emerald-500">{onlineRunners}<span className="text-sm text-muted-foreground font-normal">/{runners.length}</span></p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <Activity className="w-5 h-5 text-emerald-500" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {error && (
         <Alert variant="destructive">
@@ -123,49 +190,166 @@ const Servers = () => {
         </Alert>
       )}
 
-      {/* API Diagnostic Panel */}
+      {/* Diagnostic Panel (collapsible) */}
       <ServerApiDiagnostic />
 
-      {/* Servers Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Serveurs via API
-        </h2>
-        {enrichedServers && enrichedServers.length > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {enrichedServers.length} serveur{enrichedServers.length > 1 ? 's' : ''} • {runners.length} runners
-          </span>
-        )}
-      </div>
-
+      {/* Servers List */}
       {enrichedServers && enrichedServers.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {enrichedServers.map(server => (
-            <ServerCard
-              key={server.id}
-              server={server}
-              runner={getRunnerForServer(server)}
-              runners={runners}
-              onRunnerChange={(runnerId) => handleRunnerChange(server.id, runnerId)}
-              onDelete={() => setDeletingServer(server)}
-              isUpdating={updateServerRunner.isPending}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="glass-panel rounded-xl p-8">
-          <div className="text-center py-12 text-muted-foreground">
-            <Server className="w-16 h-16 mx-auto mb-4 opacity-30" />
-            <h3 className="text-lg font-medium mb-2">Aucun serveur dans l'API</h3>
-            <p className="text-sm max-w-md mx-auto mb-6">
-              Créez des serveurs via l'API Orders pour les associer aux runners.
-            </p>
-            <Button onClick={handleCreate}>
-              <Plus className="w-4 h-4 mr-2" />
-              Créer un serveur
-            </Button>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              {totalServers} serveur{totalServers > 1 ? 's' : ''} enregistré{totalServers > 1 ? 's' : ''}
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {enrichedServers.map(server => {
+              const runner = getRunnerForServer(server);
+              const hasRunner = !!server.runnerId;
+              const runnerName = runner?.name || server.runnerName;
+              const runnerStatus = runner?.status || server.runnerStatus;
+
+              return (
+                <Card key={server.id} className="glass-panel hover:border-primary/30 transition-all group">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center border border-primary/20">
+                          <Server className="w-5 h-5 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-foreground">{server.name}</h3>
+                          {server.host && (
+                            <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                              {server.host}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem 
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeletingServer(server)}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Supprimer
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="space-y-4">
+                    {/* Status Badges */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge 
+                        variant={hasRunner ? 'default' : 'secondary'}
+                        className={cn(
+                          'text-xs',
+                          hasRunner && 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/20'
+                        )}
+                      >
+                        {hasRunner ? (
+                          <><Link2 className="w-3 h-3 mr-1" /> Associé</>
+                        ) : (
+                          <><Link2Off className="w-3 h-3 mr-1" /> Non associé</>
+                        )}
+                      </Badge>
+
+                      {hasRunner && runnerStatus && (
+                        <Badge 
+                          variant="outline"
+                          className={cn(
+                            'text-xs',
+                            runnerStatus === 'ONLINE' && 'border-emerald-500/30 text-emerald-500',
+                            runnerStatus === 'OFFLINE' && 'border-muted-foreground/30 text-muted-foreground'
+                          )}
+                        >
+                          <span className={cn(
+                            'w-1.5 h-1.5 rounded-full mr-1.5',
+                            runnerStatus === 'ONLINE' ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground'
+                          )} />
+                          {runnerName || 'Agent'}
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* Runner Selector */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Agent associé
+                      </label>
+                      <Select
+                        value={server.runnerId || '__none__'}
+                        onValueChange={(value) => handleRunnerChange(server.id, value === '__none__' ? null : value)}
+                        disabled={updateServerRunner.isPending}
+                      >
+                        <SelectTrigger className="w-full h-9 text-sm">
+                          <SelectValue placeholder="Sélectionner un agent..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">
+                            <span className="text-muted-foreground">Aucun (dissocier)</span>
+                          </SelectItem>
+                          {sortedRunners.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>
+                              <div className="flex items-center gap-2">
+                                <span className={cn(
+                                  'w-2 h-2 rounded-full',
+                                  r.status === 'ONLINE' ? 'bg-emerald-500' : 'bg-muted-foreground'
+                                )} />
+                                <span>{r.name}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  ({r.status === 'ONLINE' ? 'En ligne' : 'Hors ligne'})
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Server ID (subtle) */}
+                    <div className="pt-2 border-t border-border/30">
+                      <p className="text-[10px] text-muted-foreground/60 font-mono truncate">
+                        ID: {server.id}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
+      ) : (
+        <Card className="glass-panel">
+          <CardContent className="py-16">
+            <div className="text-center text-muted-foreground">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Server className="w-8 h-8 text-primary/60" />
+              </div>
+              <h3 className="text-lg font-medium mb-2">Aucun serveur</h3>
+              <p className="text-sm max-w-md mx-auto mb-6">
+                Créez votre premier serveur pour commencer à gérer vos infrastructures et associer des agents.
+              </p>
+              <Button onClick={handleCreate}>
+                <Plus className="w-4 h-4 mr-2" />
+                Créer un serveur
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Create Form Dialog */}
@@ -183,7 +367,7 @@ const Servers = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Supprimer le serveur ?</AlertDialogTitle>
             <AlertDialogDescription>
-              Cette action est irréversible. Le serveur "{deletingServer?.name}" sera supprimé de l'API.
+              Cette action est irréversible. Le serveur "{deletingServer?.name}" sera supprimé définitivement.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
