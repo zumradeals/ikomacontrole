@@ -61,6 +61,12 @@ export interface CreateOrderInput {
   infrastructure_id?: string | null;
 }
 
+function extractPlaybookKeyFromDescription(description?: string | null): string | null {
+  if (!description) return null;
+  const match = description.match(/^\[([a-z0-9_.-]+)\]/i);
+  return match?.[1] ?? null;
+}
+
 // Map category to action for external API
 function categoryToAction(category: OrderCategory): string {
   switch (category) {
@@ -145,7 +151,10 @@ export function useCreateOrder() {
 
   return useMutation({
     mutationFn: async (input: CreateOrderInput) => {
-      const playbookKey = input.playbook_key || `${input.category}.custom`;
+      const playbookKey =
+        input.playbook_key ||
+        extractPlaybookKeyFromDescription(input.description) ||
+        `${input.category}.custom`;
       const action = categoryToAction(input.category);
       const serverId = input.server_id || input.infrastructure_id;
       
@@ -157,57 +166,56 @@ export function useCreateOrder() {
         hasServerId: !!serverId,
       });
 
-      // If we have a server_id, create via external API
+      // If we have a serverId (server-centric orchestration), create via external API.
+      // IMPORTANT: do NOT silently fall back to local orders, otherwise orders get stuck in "pending".
       if (serverId) {
-        try {
-          const externalResult = await createExternalOrder({
-            serverId,
-            playbookKey,
-            action,
-            createdBy: 'dashboard',
-            name: input.name,
-            command: input.command,
-            description: input.description,
-          });
+        const externalResult = await createExternalOrder({
+          serverId,
+          playbookKey,
+          action,
+          createdBy: 'dashboard',
+          name: input.name,
+          command: input.command,
+          description: input.description,
+        });
 
-          if (externalResult.success && externalResult.data) {
-            console.log('[useCreateOrder] External order created:', externalResult.data);
-
-            // Also create a local copy for real-time tracking via Supabase Realtime
-            const meta = { 
-              server_id: serverId,
-              external_id: externalResult.data.id,
-              playbook_key: playbookKey,
-            };
-            
-            const { data: localOrder, error: localError } = await supabase
-              .from('orders')
-              .insert({
-                id: externalResult.data.id,
-                runner_id: input.runner_id,
-                infrastructure_id: input.infrastructure_id || null,
-                category: input.category,
-                name: input.name,
-                description: input.description || null,
-                command: input.command,
-                status: 'pending',
-                meta,
-              })
-              .select()
-              .single();
-
-            if (localError) {
-              console.warn('[useCreateOrder] Local insert failed (may already exist):', localError);
-            }
-
-            return localOrder || externalResult.data;
-          }
-          
-          // If external API failed, log and fall through to local-only creation
-          console.warn('[useCreateOrder] External API failed, falling back to local:', externalResult.error);
-        } catch (err) {
-          console.warn('[useCreateOrder] External API error, falling back to local:', err);
+        if (!externalResult.success || !externalResult.data) {
+          throw new Error(
+            externalResult.error ||
+              "Impossible d'envoyer l'ordre à l'agent (service d'ordres indisponible)."
+          );
         }
+
+        console.log('[useCreateOrder] External order created:', externalResult.data);
+
+        // Also create a local copy for real-time tracking via Supabase Realtime
+        const meta = {
+          server_id: serverId,
+          external_id: externalResult.data.id,
+          playbook_key: playbookKey,
+        };
+
+        const { data: localOrder, error: localError } = await supabase
+          .from('orders')
+          .insert({
+            id: externalResult.data.id,
+            runner_id: input.runner_id,
+            infrastructure_id: input.infrastructure_id || null,
+            category: input.category,
+            name: input.name,
+            description: input.description || null,
+            command: input.command,
+            status: 'pending',
+            meta,
+          })
+          .select()
+          .single();
+
+        if (localError) {
+          console.warn('[useCreateOrder] Local insert failed (may already exist):', localError);
+        }
+
+        return localOrder || externalResult.data;
       }
 
       // Fallback: Create locally only (for backwards compatibility or when external API unavailable)
