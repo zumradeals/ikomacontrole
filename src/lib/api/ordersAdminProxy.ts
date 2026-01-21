@@ -308,6 +308,23 @@ export async function updateServerRunner(serverId: string, runnerId: string | nu
   });
 }
 
+export async function updateServer(serverId: string, updates: { name?: string; host?: string }): Promise<ApiResponse<ProxyServer>> {
+  const response = await bffRequest<any>({
+    method: 'PATCH',
+    path: `/servers/${serverId}`,
+    body: updates,
+  });
+
+  if (!response.success || !response.data) {
+    return { success: false, error: response.error };
+  }
+
+  return {
+    success: true,
+    data: mapServer(response.data),
+  };
+}
+
 export async function deleteServer(serverId: string): Promise<ApiResponse<void>> {
   return bffRequest<void>({
     method: 'DELETE',
