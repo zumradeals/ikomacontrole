@@ -11,8 +11,10 @@ import {
   Loader2,
   Power,
   PowerOff,
-  Filter,
-  Search
+  Search,
+  Server,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -21,10 +23,10 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { InfraSelector } from '@/components/platform/InfraSelector';
+import { ServerSelector } from '@/components/platform/ServerSelector';
 import { AutoDetectDialog } from '@/components/infra/AutoDetectDialog';
 import { CustomOrderDialog } from '@/components/infra/CustomOrderDialog';
-import { usePlatformServices } from '@/hooks/usePlatformServices';
+import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
 import { PLAYBOOK_GROUPS, Playbook, PlaybookPrerequisite, ALL_PLAYBOOKS } from '@/lib/playbooks';
 import { toast } from '@/hooks/use-toast';
@@ -176,7 +178,7 @@ function PlaybookCardGrid({
 }
 
 const Playbooks = () => {
-  const [selectedInfraId, setSelectedInfraId] = useState<string | undefined>();
+  const [selectedServerId, setSelectedServerId] = useState<string | undefined>();
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
   const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
@@ -184,29 +186,25 @@ const Playbooks = () => {
   const [activeGroup, setActiveGroup] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [enabledPlaybooks, setEnabledPlaybooks] = useState<Set<string>>(() => {
-    // All playbooks are enabled by default
     return new Set(ALL_PLAYBOOKS.map(p => p.id));
   });
 
   const {
-    infrastructures,
-    runners,
-    selectedInfra,
+    servers,
+    runnersById,
+    selectedServer,
     associatedRunner,
-    gating,
     orders,
-  } = usePlatformServices(selectedInfraId);
+    gating,
+  } = usePlaybookServices(selectedServerId);
 
   const createOrder = useCreateOrder();
 
-  // Parse capabilities
+  // Parse capabilities from runner hostInfo or use empty object
+  // TODO: Capabilities should come from API in future
   const capabilities = useMemo(() => {
-    if (!selectedInfra?.capabilities) return {};
-    if (typeof selectedInfra.capabilities === 'object' && !Array.isArray(selectedInfra.capabilities)) {
-      return selectedInfra.capabilities as Record<string, string>;
-    }
-    return {};
-  }, [selectedInfra]);
+    return {} as Record<string, string>;
+  }, []);
 
   // Map playbook group to order category
   const getCategory = (group: string): OrderCategory => {
@@ -228,7 +226,7 @@ const Playbooks = () => {
     if (!associatedRunner) {
       toast({
         title: 'Erreur',
-        description: 'Aucun runner associé à cette infrastructure',
+        description: 'Aucun agent associé à ce serveur',
         variant: 'destructive',
       });
       return;
@@ -238,7 +236,7 @@ const Playbooks = () => {
     try {
       await createOrder.mutateAsync({
         runner_id: associatedRunner.id,
-        infrastructure_id: selectedInfraId,
+        server_id: selectedServerId,
         category: getCategory(playbook.group),
         name: playbook.name,
         description: `[${playbook.id}] ${playbook.description}`,
@@ -269,17 +267,14 @@ const Playbooks = () => {
   const filteredPlaybooks = useMemo(() => {
     let result = ALL_PLAYBOOKS;
     
-    // Filter by group
     if (activeGroup !== 'all') {
       result = result.filter(p => p.group === activeGroup);
     }
     
-    // Filter by level
     if (!showExpert) {
       result = result.filter(p => p.level === 'simple');
     }
     
-    // Filter by search
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(p => 
@@ -308,7 +303,7 @@ const Playbooks = () => {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Playbooks"
-        description="Bibliothèque de scripts d'automatisation pour votre infrastructure"
+        description="Bibliothèque de scripts d'automatisation pour vos serveurs"
         icon={Terminal}
       />
 
@@ -324,35 +319,63 @@ const Playbooks = () => {
           <TabsTrigger value="history">Historique</TabsTrigger>
         </TabsList>
 
-        {/* Infrastructure Selector */}
+        {/* Server Selector */}
         <div className="glass-panel rounded-xl p-4">
-          <InfraSelector
-            infrastructures={infrastructures}
-            runners={runners}
-            selectedId={selectedInfraId}
-            onSelect={setSelectedInfraId}
+          <ServerSelector
+            servers={servers}
+            runnersById={runnersById}
+            selectedId={selectedServerId}
+            onSelect={setSelectedServerId}
           />
+          
+          {/* Show selected server info */}
+          {selectedServer && (
+            <div className="mt-3 pt-3 border-t border-border/50 flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <Server className="w-4 h-4 text-muted-foreground" />
+                <span className="text-muted-foreground">Serveur:</span>
+                <span className="font-medium">{selectedServer.name}</span>
+              </div>
+              {associatedRunner ? (
+                <div className="flex items-center gap-2">
+                  {gating.runnerOnline ? (
+                    <Wifi className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-amber-400" />
+                  )}
+                  <span className="text-muted-foreground">Agent:</span>
+                  <span className={gating.runnerOnline ? 'text-emerald-400' : 'text-amber-400'}>
+                    {associatedRunner.name}
+                  </span>
+                </div>
+              ) : (
+                <Badge variant="outline" className="text-amber-400 border-amber-500/30">
+                  Aucun agent associé
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Warning if no runner */}
-        {selectedInfraId && !isRunnerReady && (
+        {selectedServerId && !isRunnerReady && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             {!gating.hasRunner 
-              ? "Aucun runner associé à cette infrastructure."
-              : "Le runner est hors ligne. Les ordres seront exécutés à sa prochaine connexion."
+              ? "Aucun agent associé à ce serveur. Associez un agent depuis la page Serveurs."
+              : "L'agent est hors ligne. Les ordres seront exécutés à sa prochaine connexion."
             }
           </div>
         )}
 
         {/* Catalog Tab */}
         <TabsContent value="catalog" className="space-y-4">
-          {!selectedInfraId ? (
+          {!selectedServerId ? (
             <div className="glass-panel rounded-xl p-8 text-center">
-              <AlertTriangle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Aucune infrastructure sélectionnée</h3>
+              <Server className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Aucun serveur sélectionné</h3>
               <p className="text-muted-foreground">
-                Sélectionnez une infrastructure pour accéder au catalogue de playbooks.
+                Sélectionnez un serveur pour accéder au catalogue de playbooks.
               </p>
             </div>
           ) : (
@@ -360,7 +383,6 @@ const Playbooks = () => {
               {/* Filters bar */}
               <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                 <div className="flex items-center gap-3 flex-wrap">
-                  {/* Quick actions */}
                   <Button
                     variant="outline"
                     size="sm"
@@ -371,7 +393,6 @@ const Playbooks = () => {
                     Auto-détection
                   </Button>
                   
-                  {/* Search */}
                   <div className="relative">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                     <Input
@@ -465,9 +486,9 @@ const Playbooks = () => {
 
         {/* Custom Tab */}
         <TabsContent value="custom" className="space-y-4">
-          {!selectedInfraId ? (
+          {!selectedServerId ? (
             <div className="glass-panel rounded-xl p-8 text-center text-muted-foreground">
-              Sélectionnez une infrastructure pour créer des commandes personnalisées.
+              Sélectionnez un serveur pour créer des commandes personnalisées.
             </div>
           ) : (
             <div className="glass-panel rounded-xl p-6">
@@ -478,7 +499,7 @@ const Playbooks = () => {
                 <div>
                   <h3 className="text-lg font-semibold">Commandes personnalisées</h3>
                   <p className="text-sm text-muted-foreground">
-                    Créez et exécutez des scripts shell personnalisés sur votre infrastructure.
+                    Créez et exécutez des scripts shell personnalisés sur votre serveur.
                   </p>
                 </div>
               </div>
@@ -499,7 +520,7 @@ const Playbooks = () => {
         <TabsContent value="history" className="space-y-4">
           {orders.length === 0 ? (
             <div className="glass-panel rounded-xl p-8 text-center text-muted-foreground">
-              Aucun ordre exécuté pour cette infrastructure.
+              Aucun ordre exécuté pour ce serveur.
             </div>
           ) : (
             <div className="glass-panel rounded-xl p-4">
@@ -539,22 +560,30 @@ const Playbooks = () => {
       </Tabs>
 
       {/* Auto-detect Dialog */}
-      {selectedInfraId && associatedRunner && (
+      {selectedServerId && associatedRunner && (
         <AutoDetectDialog
           open={autoDetectDialogOpen}
           onOpenChange={setAutoDetectDialogOpen}
-          infrastructureId={selectedInfraId}
-          runner={associatedRunner}
+          infrastructureId={selectedServerId}
+          runner={{
+            id: associatedRunner.id,
+            name: associatedRunner.name,
+            status: associatedRunner.status === 'ONLINE' ? 'online' : 'offline',
+          }}
         />
       )}
 
       {/* Custom Order Dialog */}
-      {selectedInfraId && associatedRunner && (
+      {selectedServerId && associatedRunner && (
         <CustomOrderDialog
           open={customOrderDialogOpen}
           onOpenChange={setCustomOrderDialogOpen}
-          infrastructureId={selectedInfraId}
-          runner={associatedRunner}
+          infrastructureId={selectedServerId}
+          runner={{
+            id: associatedRunner.id,
+            name: associatedRunner.name,
+            status: associatedRunner.status === 'ONLINE' ? 'online' : 'offline',
+          }}
         />
       )}
     </div>
