@@ -51,6 +51,27 @@ export interface Playbook {
 
 const SYSTEM_PLAYBOOKS: Playbook[] = [
   {
+    id: 'system.test_ping',
+    group: 'system',
+    name: 'Test de connectivité',
+    description: 'Vérifie que le runner peut exécuter une commande et renvoyer un résultat',
+    level: 'simple',
+    risk: 'low',
+    duration: '~5s',
+    icon: Terminal,
+    prerequisites: [],
+    verifies: [],
+    command: `#!/bin/bash
+echo "=== IKOMA Test Ping ==="
+echo "Hostname: $(hostname)"
+echo "Date: $(date)"
+echo "User: $(whoami)"
+echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
+echo ""
+echo "PING OK"
+`,
+  },
+  {
     id: 'system.autodiscover',
     group: 'system',
     name: 'Auto-découverte complète',
