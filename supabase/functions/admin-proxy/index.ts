@@ -56,21 +56,26 @@ serve(async (req) => {
     const httpMethod = method || 'GET';
     console.info(`Proxying ${httpMethod} ${targetUrl}`);
 
+    // Build headers - only include Content-Type for requests with body
+    const headers: Record<string, string> = {
+      'x-ikoma-admin-key': adminKey,
+    };
+
     const fetchOptions: RequestInit = {
       method: httpMethod,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-ikoma-admin-key': adminKey,
-      },
+      headers,
     };
 
     // Add body for POST/PUT/PATCH requests
     if (body && ['POST', 'PUT', 'PATCH'].includes(httpMethod)) {
+      headers['Content-Type'] = 'application/json';
       fetchOptions.body = JSON.stringify(body);
     } else if (['POST', 'PUT', 'PATCH'].includes(httpMethod)) {
       // Send empty object for POST/PUT/PATCH without body
+      headers['Content-Type'] = 'application/json';
       fetchOptions.body = JSON.stringify({});
     }
+    // DELETE requests: no Content-Type header, no body
 
     const startTime = Date.now();
     const response = await fetch(targetUrl, fetchOptions);
