@@ -123,3 +123,10 @@ export async function checkApiReady(): Promise<boolean> {
 export const ORDERS_API_BASE_URL = API_BASE_URL;
 export const ORDERS_API_V1_URL = API_BASE_URL;
 export const ORDERS_API_FULL_URL = API_BASE_URL;
+
+/**
+ * Build runner installation command
+ */
+export function buildInstallCommand(token: string): string {
+  return `curl -fsSL https://get.ikoma.io/runner | bash -s -- --token "${token}"`;
+}
