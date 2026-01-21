@@ -241,13 +241,13 @@ export function useAssociateRunner() {
         // Attach runner to infrastructure
         const result = await attachRunnerToServer(infrastructureId, runnerId);
         if (!result.success) {
-          throw new Error(result.message || 'Failed to associate runner');
+          throw new Error(result.error || 'Failed to associate runner');
         }
       } else {
         // Detach runner from infrastructure
         const result = await detachRunnerFromServer(runnerId);
         if (!result.success) {
-          throw new Error(result.message || 'Failed to dissociate runner');
+          throw new Error(result.error || 'Failed to dissociate runner');
         }
       }
     },

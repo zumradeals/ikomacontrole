@@ -21,9 +21,12 @@ import {
   clearProxyLogs,
   type ProxyRunner,
   type CreateRunnerResult,
-  type AttachResult,
   type ProxyLogEntry,
+  type ApiResponse,
 } from '@/lib/api/ordersAdminProxy';
+
+// Local type for attach/detach results
+type AttachResult = ApiResponse<{ success: boolean; message?: string }>;
 
 // ============================================
 // Query Keys
@@ -219,11 +222,11 @@ export function useAttachRunner() {
     }): Promise<AttachResult> => {
       const result = await attachRunnerToServer(serverId, runnerId);
       if (!result.success) {
-        throw new Error(result.message || 'Failed to attach runner');
+        throw new Error(result.error || 'Failed to attach runner');
       }
       return result;
     },
-    onSuccess: (result) => {
+    onSuccess: () => {
       // Invalidate all related queries to force refresh
       queryClient.invalidateQueries({ queryKey: serverQueryKeys.runners });
       queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });
@@ -232,7 +235,7 @@ export function useAttachRunner() {
       
       toast({
         title: 'Agent associé',
-        description: result.message || 'L\'agent a été associé au serveur.',
+        description: 'L\'agent a été associé au serveur.',
       });
     },
     onError: (error: Error) => {
@@ -261,11 +264,11 @@ export function useDetachRunner() {
     }): Promise<AttachResult> => {
       const result = await detachRunnerFromServer(runnerId, serverId);
       if (!result.success) {
-        throw new Error(result.message || 'Failed to detach runner');
+        throw new Error(result.error || 'Failed to detach runner');
       }
       return result;
     },
-    onSuccess: (result) => {
+    onSuccess: () => {
       // Invalidate all related queries to force refresh
       queryClient.invalidateQueries({ queryKey: serverQueryKeys.runners });
       queryClient.invalidateQueries({ queryKey: ['proxy-runners'] });
@@ -274,7 +277,7 @@ export function useDetachRunner() {
       
       toast({
         title: 'Agent dissocié',
-        description: result.message || 'L\'agent a été dissocié du serveur.',
+        description: 'L\'agent a été dissocié du serveur.',
       });
     },
     onError: (error: Error) => {
@@ -410,4 +413,4 @@ export function useVerifyRunnerAssociation() {
 }
 
 // Re-export types for convenience
-export type { ProxyRunner, CreateRunnerResult, AttachResult, ProxyLogEntry };
+export type { ProxyRunner, CreateRunnerResult, ProxyLogEntry };
