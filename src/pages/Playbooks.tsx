@@ -14,7 +14,8 @@ import {
   Search,
   Server,
   Wifi,
-  WifiOff
+  WifiOff,
+  Shield
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -26,8 +27,10 @@ import { Input } from '@/components/ui/input';
 import { ServerSelector } from '@/components/platform/ServerSelector';
 import { AutoDetectDialog } from '@/components/infra/AutoDetectDialog';
 import { CustomOrderDialog } from '@/components/infra/CustomOrderDialog';
+import { PlaybookExecutionTracker } from '@/components/playbooks/PlaybookExecutionTracker';
 import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
+import { checkCapabilities, getCapabilityLabel } from '@/hooks/useRunnerCapabilities';
 import { PLAYBOOK_GROUPS, Playbook, PlaybookPrerequisite, ALL_PLAYBOOKS } from '@/lib/playbooks';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -196,15 +199,21 @@ const Playbooks = () => {
     associatedRunner,
     orders,
     gating,
+    capabilities,
   } = usePlaybookServices(selectedServerId);
 
   const createOrder = useCreateOrder();
 
-  // Parse capabilities from runner hostInfo or use empty object
-  // TODO: Capabilities should come from API in future
-  const capabilities = useMemo(() => {
-    return {} as Record<string, string>;
-  }, []);
+  // Convert capabilities to Record<string, string> for checkPrerequisites
+  const capabilitiesRecord = useMemo(() => {
+    const record: Record<string, string> = {};
+    if (capabilities) {
+      for (const [key, value] of Object.entries(capabilities)) {
+        if (value) record[key] = value;
+      }
+    }
+    return record;
+  }, [capabilities]);
 
   // Map playbook group to order category
   const getCategory = (group: string): OrderCategory => {
@@ -368,6 +377,47 @@ const Playbooks = () => {
           </div>
         )}
 
+        {/* Real-time execution tracker */}
+        {associatedRunner && orders.length > 0 && (
+          <PlaybookExecutionTracker
+            runnerId={associatedRunner.id}
+            orders={orders}
+          />
+        )}
+
+        {/* Capabilities summary */}
+        {associatedRunner && Object.keys(capabilitiesRecord).length > 0 && (
+          <div className="glass-panel rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Shield className="w-4 h-4 text-primary" />
+              <h3 className="font-semibold text-sm">Capacités détectées</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(capabilitiesRecord)
+                .filter(([_, status]) => status === 'installed' || status === 'verified')
+                .slice(0, 12)
+                .map(([key, status]) => (
+                  <Badge 
+                    key={key} 
+                    variant="outline" 
+                    className={status === 'verified' 
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                      : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                    }
+                  >
+                    {status === 'verified' && <CheckCircle2 className="w-3 h-3 mr-1" />}
+                    {getCapabilityLabel(key)}
+                  </Badge>
+                ))}
+              {Object.keys(capabilitiesRecord).length > 12 && (
+                <Badge variant="outline" className="text-muted-foreground">
+                  +{Object.keys(capabilitiesRecord).length - 12} autres
+                </Badge>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Catalog Tab */}
         <TabsContent value="catalog" className="space-y-4">
           {!selectedServerId ? (
@@ -470,7 +520,7 @@ const Playbooks = () => {
                     <PlaybookCardGrid
                       key={playbook.id}
                       playbook={playbook}
-                      capabilities={capabilities}
+                      capabilities={capabilitiesRecord}
                       onExecute={handleExecute}
                       isLoading={executingId === playbook.id}
                       disabled={!isRunnerReady}
