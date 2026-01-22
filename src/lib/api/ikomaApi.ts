@@ -74,9 +74,12 @@ export interface ApiResult<T> {
 }
 
 // ============================================
-// Playbooks (liste statique minimale)
+// Playbooks - DEPRECATED: Use usePlaybooks hook instead
+// Cette liste statique est conservée uniquement pour fallback
+// La source de vérité est GET /v1/admin/playbooks
 // ============================================
 
+/** @deprecated Use usePlaybooks hook - this is kept only as fallback */
 export const STATIC_PLAYBOOKS = [
   { key: 'SYSTEM.diagnostics', name: 'System Diagnostics', description: 'Run comprehensive system diagnostics' },
   { key: 'SYSTEM.heartbeat', name: 'Heartbeat Check', description: 'Quick connectivity test' },

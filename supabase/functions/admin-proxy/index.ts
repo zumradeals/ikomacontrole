@@ -77,6 +77,206 @@ serve(async (req) => {
     }
     // DELETE requests: no Content-Type header, no body
 
+    // Special handling for /admin/playbooks - return mock data if API doesn't have it yet
+    if (path === '/admin/playbooks' && httpMethod === 'GET') {
+      // TODO: This will be replaced when API endpoint is ready
+      // For now, return a standardized playbook catalog
+      const playbooks = {
+        items: [
+          {
+            key: 'SYSTEM.diagnostics',
+            version: 'v1',
+            title: 'System diagnostics',
+            description: 'Inspection complète du système: OS, ressources, services',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string', description: 'ID du serveur cible' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'SYSTEM.heartbeat',
+            version: 'v1',
+            title: 'Heartbeat Check',
+            description: 'Test de connectivité rapide avec le runner',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'system.test_ping',
+            version: 'v1',
+            title: 'Test de connectivité',
+            description: 'Vérifie que le runner peut exécuter une commande',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'system.autodiscover',
+            version: 'v1',
+            title: 'Auto-découverte',
+            description: 'Détecte automatiquement tous les logiciels installés',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'system.info',
+            version: 'v1',
+            title: 'Informations système',
+            description: 'Collecte OS, distribution, architecture, CPU, RAM, disque',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'docker.install',
+            version: 'v1',
+            title: 'Installer Docker',
+            description: 'Installe Docker Engine et Docker Compose',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'docker.verify',
+            version: 'v1',
+            title: 'Vérifier Docker',
+            description: 'Vérifie l\'installation et le statut Docker',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'caddy.install',
+            version: 'v1',
+            title: 'Installer Caddy',
+            description: 'Installe Caddy comme reverse proxy avec HTTPS auto',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'caddy.verify',
+            version: 'v1',
+            title: 'Vérifier Caddy',
+            description: 'Vérifie l\'installation et le statut Caddy',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'nodejs.install',
+            version: 'v1',
+            title: 'Installer Node.js',
+            description: 'Installe Node.js LTS via nvm',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' },
+                version: { type: 'string', description: 'Version Node.js (default: lts)' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'security.ufw.setup',
+            version: 'v1',
+            title: 'Configurer UFW',
+            description: 'Configure le firewall UFW avec règles de base',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          },
+          {
+            key: 'security.fail2ban.install',
+            version: 'v1',
+            title: 'Installer Fail2ban',
+            description: 'Installe et configure Fail2ban',
+            visibility: 'internal',
+            actions: ['run'],
+            schema: {
+              type: 'object',
+              properties: {
+                serverId: { type: 'string' }
+              },
+              required: ['serverId']
+            }
+          }
+        ]
+      };
+
+      console.info('Returning playbook catalog (mock data)');
+      return new Response(
+        JSON.stringify(playbooks),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     const startTime = Date.now();
     const response = await fetch(targetUrl, fetchOptions);
     const duration = Date.now() - startTime;
