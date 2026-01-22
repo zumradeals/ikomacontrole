@@ -67,7 +67,12 @@ const statusConfig: Record<OrderStatus, { icon: React.ReactNode; label: string; 
     class: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
   },
   claimed: {
-    icon: <Terminal className="w-4 h-4" />,
+    icon: (
+      <span className="relative flex h-4 w-4 items-center justify-center">
+        <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-purple-400 opacity-75"></span>
+        <Terminal className="relative w-3.5 h-3.5" />
+      </span>
+    ),
     label: 'Réclamé',
     class: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
   },
@@ -310,19 +315,23 @@ export function OrdersHistory({ runnerId, infrastructureId }: OrdersHistoryProps
 
   // Group by status
   const pending = orders.filter(o => o.status === 'pending');
+  const claimed = orders.filter(o => o.status === 'claimed');
   const running = orders.filter(o => o.status === 'running');
   const completed = orders.filter(o => o.status === 'completed' || o.status === 'failed' || o.status === 'cancelled');
 
   return (
     <div className="space-y-4">
       {/* Active orders */}
-      {(pending.length > 0 || running.length > 0) && (
+      {(pending.length > 0 || claimed.length > 0 || running.length > 0) && (
         <div>
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-            Ordres actifs ({pending.length + running.length})
+            Ordres actifs ({pending.length + claimed.length + running.length})
           </h4>
           <div className="space-y-2">
             {running.map(order => (
+              <OrderItem key={order.id} order={order} />
+            ))}
+            {claimed.map(order => (
               <OrderItem key={order.id} order={order} />
             ))}
             {pending.map(order => (

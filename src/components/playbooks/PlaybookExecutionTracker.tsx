@@ -52,7 +52,12 @@ const statusConfig: Record<OrderStatus, {
     bgColor: 'bg-amber-500/10',
   },
   claimed: {
-    icon: <Zap className="w-4 h-4" />,
+    icon: (
+      <span className="relative flex h-4 w-4 items-center justify-center">
+        <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-purple-400 opacity-75"></span>
+        <Zap className="relative w-3.5 h-3.5" />
+      </span>
+    ),
     label: 'Réclamé',
     color: 'text-purple-400',
     bgColor: 'bg-purple-500/10',
@@ -112,6 +117,7 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
     <div className={cn(
       "rounded-lg border transition-all duration-200",
       order.status === 'running' && "border-blue-500/50 bg-blue-500/5",
+      order.status === 'claimed' && "border-purple-500/50 bg-purple-500/5",
       order.status === 'pending' && "border-amber-500/30 bg-amber-500/5",
       order.status === 'completed' && "border-emerald-500/30",
       order.status === 'failed' && "border-red-500/30",
@@ -155,6 +161,16 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
               </span>
             )}
+          </div>
+        )}
+
+        {/* Progress indicator for claimed */}
+        {order.status === 'claimed' && (
+          <div className="w-16 text-right flex items-center justify-end gap-1.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500"></span>
+            </span>
           </div>
         )}
 
@@ -261,13 +277,13 @@ export function PlaybookExecutionTracker({
   // Track which orders we've already processed for capability sync
   const processedOrdersRef = useRef<Set<string>>(new Set());
 
-  // Filter to active orders (pending/running) and recent completed/failed
+  // Filter to active orders (pending/claimed/running) and recent completed/failed
   const activeOrders = useMemo(() => {
     const now = Date.now();
     const recentThreshold = 5 * 60 * 1000; // 5 minutes
     
     return orders.filter(o => {
-      if (o.status === 'pending' || o.status === 'running') return true;
+      if (o.status === 'pending' || o.status === 'claimed' || o.status === 'running') return true;
       // Show completed/failed for 5 minutes
       if (o.completed_at) {
         return now - new Date(o.completed_at).getTime() < recentThreshold;
@@ -332,6 +348,7 @@ export function PlaybookExecutionTracker({
   }
 
   const runningCount = activeOrders.filter(o => o.status === 'running').length;
+  const claimedCount = activeOrders.filter(o => o.status === 'claimed').length;
   const pendingCount = activeOrders.filter(o => o.status === 'pending').length;
 
   return (
@@ -345,7 +362,7 @@ export function PlaybookExecutionTracker({
             <RefreshCw className="w-3 h-3 text-primary animate-spin" />
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {isSyncing && (
             <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/30">
               <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
@@ -356,6 +373,12 @@ export function PlaybookExecutionTracker({
             <Badge variant="outline" className="text-xs bg-blue-500/10 text-blue-400 border-blue-500/30">
               <Loader2 className="w-3 h-3 mr-1 animate-spin" />
               {runningCount} en cours
+            </Badge>
+          )}
+          {claimedCount > 0 && (
+            <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-400 border-purple-500/30">
+              <Zap className="w-3 h-3 mr-1" />
+              {claimedCount} réclamé{claimedCount > 1 ? 's' : ''}
             </Badge>
           )}
           {pendingCount > 0 && (

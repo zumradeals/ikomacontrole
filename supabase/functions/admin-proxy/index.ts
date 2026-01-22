@@ -239,6 +239,32 @@ serve(async (req) => {
       );
     }
 
+    // For POST /admin/scripts/scan, proxy to the runner scan endpoint
+    if (path === '/admin/scripts/scan' && httpMethod === 'POST') {
+      // This is a special endpoint that requests a runner to scan its local scripts directory
+      // The responseData should contain the scan results from the runner
+      const scripts = Array.isArray(responseData?.scripts) 
+        ? responseData.scripts 
+        : Array.isArray(responseData?.items) 
+          ? responseData.items 
+          : Array.isArray(responseData) 
+            ? responseData 
+            : [];
+      
+      console.info(`[admin-proxy] Scripts scan returned ${scripts.length} scripts`);
+      return new Response(
+        JSON.stringify({ 
+          items: scripts, 
+          count: scripts.length,
+          ...baseResponse 
+        }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
     // Default: NEVER spread an array into an object - preserve array structure
     // Arrays are wrapped as { items: [...], ...proxyMeta }
     // Objects are merged with proxyMeta
