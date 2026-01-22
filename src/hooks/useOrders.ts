@@ -61,6 +61,7 @@ export interface CreateOrderInput {
   description?: string;
   command: string;
   playbook_key?: string;
+  action?: string;
   /** @deprecated Use server_id instead */
   infrastructure_id?: string | null;
 }
