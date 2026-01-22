@@ -4,6 +4,9 @@
  * Real-time visualization of running playbook/order executions.
  * Uses Supabase Realtime to show live progress updates.
  * Automatically syncs capabilities after successful execution.
+ * 
+ * PASSIVE DISPLAY: Shows data from API without interpretation.
+ * Uses reportContract when available for structured execution details.
  */
 
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -25,6 +28,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { Order, OrderStatus, useCancelOrder } from '@/hooks/useOrders';
 import { useAutoCapabilitySync } from '@/hooks/useCapabilitySync';
+import { OrderReportView } from '@/components/orders/OrderReportView';
 import { formatDistanceToNow } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -157,8 +161,13 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
       {/* Expanded content */}
       {isExpanded && (
         <div className="px-3 pb-3 pt-1 border-t border-border/50 space-y-2">
-          {/* Stdout tail - show last lines */}
-          {order.stdout_tail && (
+          {/* Report Contract - primary display when available */}
+          {order.report_contract && (
+            <OrderReportView reportContract={order.report_contract} />
+          )}
+
+          {/* Fallback: Stdout tail - only show if no reportContract */}
+          {!order.report_contract && order.stdout_tail && (
             <div>
               <p className="text-[10px] font-medium text-muted-foreground mb-1 uppercase tracking-wider">
                 Sortie
@@ -171,8 +180,8 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
             </div>
           )}
 
-          {/* Error for failed orders */}
-          {order.status === 'failed' && order.stderr_tail && (
+          {/* Error for failed orders - only show if no reportContract */}
+          {!order.report_contract && order.status === 'failed' && order.stderr_tail && (
             <div>
               <p className="text-[10px] font-medium text-red-400 mb-1 uppercase tracking-wider">
                 Erreur
