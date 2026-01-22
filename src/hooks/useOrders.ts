@@ -62,6 +62,7 @@ export interface CreateOrderInput {
   command: string;
   playbook_key?: string;
   action?: string;
+  params?: Record<string, unknown>;
   /** @deprecated Use server_id instead */
   infrastructure_id?: string | null;
 }
@@ -199,11 +200,12 @@ export function useCreateOrder() {
         const externalResult = await createExternalOrder({
           serverId,
           playbookKey,
-          action,
+          action: input.action || action,
           createdBy: 'dashboard',
           name: input.name,
           command: input.command,
           description: input.description,
+          params: input.params,
         });
 
         if (!externalResult.success || !externalResult.data) {
