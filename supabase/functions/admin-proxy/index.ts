@@ -77,10 +77,10 @@ serve(async (req) => {
     }
     // DELETE requests: no Content-Type header, no body
 
-    // Special handling for /admin/playbooks - return mock data if API doesn't have it yet
-    if (path === '/admin/playbooks' && httpMethod === 'GET') {
-      // TODO: This will be replaced when API endpoint is ready
-      // For now, return a standardized playbook catalog
+    // Special handling for /playbooks - return mock data if API doesn't have endpoint yet
+    // Once API GET /v1/playbooks is ready, remove this block and let proxy forward
+    if (path === '/playbooks' && httpMethod === 'GET') {
+      // TODO: Remove this mock when API endpoint GET /v1/playbooks is ready
       const playbooks = {
         items: [
           {
