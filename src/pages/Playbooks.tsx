@@ -2,7 +2,6 @@ import { useState, useMemo, useCallback } from 'react';
 import { 
   Terminal, 
   AlertTriangle, 
-  Scan, 
   Code,
   Play,
   Clock,
@@ -16,7 +15,13 @@ import {
   Wifi,
   WifiOff,
   Shield,
-  RefreshCw
+  RefreshCw,
+  Settings,
+  Globe,
+  HardDrive,
+  Database,
+  Zap,
+  AlertCircle
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -25,17 +30,24 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { ServerSelector } from '@/components/platform/ServerSelector';
 import { AutoDetectDialog } from '@/components/infra/AutoDetectDialog';
 import { CustomOrderDialog } from '@/components/infra/CustomOrderDialog';
 import { PlaybookExecutionTracker } from '@/components/playbooks/PlaybookExecutionTracker';
 import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
-import { checkCapabilities, getCapabilityLabel } from '@/hooks/useRunnerCapabilities';
-import { PLAYBOOK_GROUPS, Playbook, PlaybookPrerequisite, ALL_PLAYBOOKS, getPlaybookById } from '@/lib/playbooks';
+import { usePlaybooks, PlaybookItem } from '@/hooks/usePlaybooks';
+import { getCapabilityLabel } from '@/hooks/useRunnerCapabilities';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
+// Risk mapping based on visibility
+const visibilityRiskMap: Record<string, 'low' | 'medium' | 'high'> = {
+  public: 'low',
+  internal: 'medium',
+};
 
 const riskColors = {
   low: 'bg-green-500/10 text-green-400 border-green-500/30',
@@ -49,32 +61,42 @@ const riskLabels = {
   high: 'Élevé',
 };
 
-function checkPrerequisites(
-  prerequisites: PlaybookPrerequisite[],
-  capabilities: Record<string, string>
-): { met: boolean; missing: string[] } {
-  const missing: string[] = [];
-  
-  for (const prereq of prerequisites) {
-    if (prereq.required) {
-      const status = capabilities[prereq.capability];
-      if (status !== 'installed' && status !== 'verified') {
-        missing.push(prereq.label);
-      }
-    }
-  }
-  
-  return { met: missing.length === 0, missing };
+// Icon mapping based on playbook key prefix
+function getPlaybookIcon(key: string) {
+  if (key.startsWith('system.')) return Terminal;
+  if (key.startsWith('security.')) return Shield;
+  if (key.startsWith('docker.')) return HardDrive;
+  if (key.startsWith('network.')) return Globe;
+  if (key.startsWith('database.')) return Database;
+  if (key.startsWith('runtime.')) return Zap;
+  return Settings;
 }
 
+// Extract group from playbook key (e.g., "system.test_ping" -> "system")
+function getPlaybookGroup(key: string): string {
+  const parts = key.split('.');
+  return parts[0] || 'other';
+}
+
+// Group configuration with icons and labels
+const GROUP_CONFIG: Record<string, { label: string; icon: typeof Terminal }> = {
+  system: { label: 'Système', icon: Terminal },
+  security: { label: 'Sécurité', icon: Shield },
+  docker: { label: 'Docker', icon: HardDrive },
+  network: { label: 'Réseau', icon: Globe },
+  database: { label: 'Base de données', icon: Database },
+  runtime: { label: 'Runtime', icon: Zap },
+  other: { label: 'Autres', icon: Settings },
+};
+
 interface PlaybookCardGridProps {
-  playbook: Playbook;
+  playbook: PlaybookItem;
   capabilities: Record<string, string>;
-  onExecute: (playbook: Playbook) => void;
+  onExecute: (playbook: PlaybookItem) => void;
   isLoading: boolean;
   disabled: boolean;
   isEnabled: boolean;
-  onToggle: (id: string, enabled: boolean) => void;
+  onToggle: (key: string, enabled: boolean) => void;
 }
 
 function PlaybookCardGrid({ 
@@ -86,8 +108,9 @@ function PlaybookCardGrid({
   isEnabled,
   onToggle
 }: PlaybookCardGridProps) {
-  const Icon = playbook.icon;
-  const { met, missing } = checkPrerequisites(playbook.prerequisites, capabilities);
+  const Icon = getPlaybookIcon(playbook.key);
+  const risk = visibilityRiskMap[playbook.visibility] || 'medium';
+  const isExpert = playbook.visibility === 'internal';
   
   return (
     <div className={`
@@ -95,14 +118,13 @@ function PlaybookCardGrid({
       bg-card border border-border/50 
       hover:border-primary/30 transition-all duration-200
       ${!isEnabled ? 'opacity-50' : ''}
-      ${!met && isEnabled ? 'border-amber-500/30' : ''}
     `}>
       {/* Toggle in top right */}
       <div className="absolute top-3 right-3">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => onToggle(playbook.id, !isEnabled)}
+              onClick={() => onToggle(playbook.key, !isEnabled)}
               className={`
                 p-1.5 rounded-md transition-colors
                 ${isEnabled 
@@ -129,12 +151,12 @@ function PlaybookCardGrid({
           <Icon className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0 pr-8">
-          <h4 className="font-medium text-sm leading-tight truncate">{playbook.name}</h4>
+          <h4 className="font-medium text-sm leading-tight truncate">{playbook.title}</h4>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${riskColors[playbook.risk]}`}>
-              {riskLabels[playbook.risk]}
+            <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${riskColors[risk]}`}>
+              {riskLabels[risk]}
             </Badge>
-            {playbook.level === 'expert' && (
+            {isExpert && (
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-500/10 text-purple-400 border-purple-500/30">
                 Expert
               </Badge>
@@ -148,25 +170,17 @@ function PlaybookCardGrid({
         {playbook.description}
       </p>
       
-      {/* Prerequisites warning */}
-      {!met && isEnabled && (
-        <div className="flex items-start gap-1.5 mb-3 text-[10px] text-amber-400 bg-amber-500/5 rounded-md p-2">
-          <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-          <span className="line-clamp-2">Prérequis: {missing.join(', ')}</span>
-        </div>
-      )}
-      
       {/* Footer */}
       <div className="flex items-center justify-between mt-auto pt-2 border-t border-border/50">
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <Clock className="w-3 h-3" />
-          {playbook.duration}
+          v{playbook.version}
         </div>
         <Button 
           size="sm" 
-          variant={met && isEnabled ? "default" : "outline"}
+          variant={isEnabled ? "default" : "outline"}
           onClick={() => onExecute(playbook)}
-          disabled={isLoading || !met || disabled || !isEnabled}
+          disabled={isLoading || disabled || !isEnabled}
           className="h-7 text-xs gap-1"
         >
           {isLoading ? (
@@ -190,9 +204,17 @@ const Playbooks = () => {
   const [showExpert, setShowExpert] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [enabledPlaybooks, setEnabledPlaybooks] = useState<Set<string>>(() => {
-    return new Set(ALL_PLAYBOOKS.map(p => p.id));
-  });
+  const [enabledPlaybooks, setEnabledPlaybooks] = useState<Set<string>>(new Set());
+
+  // Fetch playbooks from API
+  const { data: allPlaybooks, isLoading: isLoadingPlaybooks, error: playbooksError } = usePlaybooks();
+
+  // Initialize enabled playbooks when data loads
+  useMemo(() => {
+    if (allPlaybooks && enabledPlaybooks.size === 0) {
+      setEnabledPlaybooks(new Set(allPlaybooks.map(p => p.key)));
+    }
+  }, [allPlaybooks, enabledPlaybooks.size]);
 
   const {
     servers,
@@ -206,7 +228,7 @@ const Playbooks = () => {
 
   const createOrder = useCreateOrder();
 
-  // Convert capabilities to Record<string, string> for checkPrerequisites
+  // Convert capabilities to Record<string, string>
   const capabilitiesRecord = useMemo(() => {
     const record: Record<string, string> = {};
     if (capabilities) {
@@ -217,23 +239,50 @@ const Playbooks = () => {
     return record;
   }, [capabilities]);
 
+  // Calculate groups dynamically from API playbooks
+  const groups = useMemo(() => {
+    if (!allPlaybooks) return {};
+    
+    const groupMap: Record<string, { 
+      label: string; 
+      icon: typeof Terminal; 
+      playbooks: PlaybookItem[] 
+    }> = {};
+    
+    for (const playbook of allPlaybooks) {
+      const groupKey = getPlaybookGroup(playbook.key);
+      
+      if (!groupMap[groupKey]) {
+        const config = GROUP_CONFIG[groupKey] || GROUP_CONFIG.other;
+        groupMap[groupKey] = {
+          label: config.label,
+          icon: config.icon,
+          playbooks: [],
+        };
+      }
+      
+      groupMap[groupKey].playbooks.push(playbook);
+    }
+    
+    return groupMap;
+  }, [allPlaybooks]);
+
   // Map playbook group to order category
-  const getCategory = (group: string): OrderCategory => {
+  const getCategory = (key: string): OrderCategory => {
+    const group = getPlaybookGroup(key);
     const categoryMap: Record<string, OrderCategory> = {
       system: 'detection',
       network: 'security',
       runtime: 'installation',
       docker: 'installation',
-      redis: 'installation',
-      proxy: 'installation',
-      monitoring: 'installation',
-      supabase: 'installation',
-      maintenance: 'maintenance',
+      security: 'security',
+      database: 'installation',
+      other: 'maintenance',
     };
     return categoryMap[group] || 'maintenance';
   };
 
-  const handleExecute = async (playbook: Playbook) => {
+  const handleExecute = async (playbook: PlaybookItem) => {
     if (!associatedRunner) {
       toast({
         title: 'Erreur',
@@ -243,19 +292,22 @@ const Playbooks = () => {
       return;
     }
 
-    setExecutingId(playbook.id);
+    setExecutingId(playbook.key);
     try {
+      const defaultAction = playbook.actions[0] || 'run';
       await createOrder.mutateAsync({
         runner_id: associatedRunner.id,
         server_id: selectedServerId,
-        category: getCategory(playbook.group),
-        name: playbook.name,
-        description: `[${playbook.id}] ${playbook.description}`,
-        command: playbook.command,
+        category: getCategory(playbook.key),
+        name: playbook.title,
+        description: `[${playbook.key}] ${playbook.description}`,
+        command: `playbook:${playbook.key}:${defaultAction}`,
+        playbook_key: playbook.key,
+        action: defaultAction,
       });
       toast({
         title: 'Playbook lancé',
-        description: `${playbook.name} en cours d'exécution`,
+        description: `${playbook.title} en cours d'exécution`,
       });
     } finally {
       setExecutingId(null);
@@ -273,11 +325,15 @@ const Playbooks = () => {
       return;
     }
 
-    const discoveryPlaybook = getPlaybookById('system.autodiscover');
+    // Find the auto-discover playbook from API
+    const discoveryPlaybook = allPlaybooks?.find(p => 
+      p.key === 'system.autodiscover' || p.key === 'system.auto_discover'
+    );
+    
     if (!discoveryPlaybook) {
       toast({
         title: 'Erreur',
-        description: 'Playbook d\'auto-découverte non trouvé',
+        description: 'Playbook d\'auto-découverte non trouvé dans le catalogue',
         variant: 'destructive',
       });
       return;
@@ -285,13 +341,16 @@ const Playbooks = () => {
 
     setIsAutoDiscovering(true);
     try {
+      const defaultAction = discoveryPlaybook.actions[0] || 'run';
       await createOrder.mutateAsync({
         runner_id: associatedRunner.id,
         server_id: selectedServerId,
         category: 'detection',
-        name: discoveryPlaybook.name,
-        description: `[${discoveryPlaybook.id}] ${discoveryPlaybook.description}`,
-        command: discoveryPlaybook.command,
+        name: discoveryPlaybook.title,
+        description: `[${discoveryPlaybook.key}] ${discoveryPlaybook.description}`,
+        command: `playbook:${discoveryPlaybook.key}:${defaultAction}`,
+        playbook_key: discoveryPlaybook.key,
+        action: defaultAction,
       });
       toast({
         title: 'Auto-découverte lancée',
@@ -302,13 +361,13 @@ const Playbooks = () => {
     }
   };
 
-  const handleToggle = useCallback((id: string, enabled: boolean) => {
+  const handleToggle = useCallback((key: string, enabled: boolean) => {
     setEnabledPlaybooks(prev => {
       const next = new Set(prev);
       if (enabled) {
-        next.add(id);
+        next.add(key);
       } else {
-        next.delete(id);
+        next.delete(key);
       }
       return next;
     });
@@ -316,31 +375,33 @@ const Playbooks = () => {
 
   // Filter playbooks
   const filteredPlaybooks = useMemo(() => {
-    let result = ALL_PLAYBOOKS;
+    if (!allPlaybooks) return [];
+    
+    let result = allPlaybooks;
     
     if (activeGroup !== 'all') {
-      result = result.filter(p => p.group === activeGroup);
+      result = result.filter(p => getPlaybookGroup(p.key) === activeGroup);
     }
     
     if (!showExpert) {
-      result = result.filter(p => p.level === 'simple');
+      result = result.filter(p => p.visibility === 'public');
     }
     
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(p => 
-        p.name.toLowerCase().includes(query) ||
+        p.title.toLowerCase().includes(query) ||
         p.description.toLowerCase().includes(query) ||
-        p.id.toLowerCase().includes(query)
+        p.key.toLowerCase().includes(query)
       );
     }
     
     return result;
-  }, [activeGroup, showExpert, searchQuery]);
+  }, [allPlaybooks, activeGroup, showExpert, searchQuery]);
 
   // Count stats
   const stats = useMemo(() => {
-    const enabled = filteredPlaybooks.filter(p => enabledPlaybooks.has(p.id)).length;
+    const enabled = filteredPlaybooks.filter(p => enabledPlaybooks.has(p.key)).length;
     return {
       total: filteredPlaybooks.length,
       enabled,
@@ -363,7 +424,7 @@ const Playbooks = () => {
           <TabsTrigger value="catalog">
             Catalogue
             <Badge variant="secondary" className="ml-2 text-xs">
-              {stats.enabled}/{stats.total}
+              {isLoadingPlaybooks ? '...' : `${stats.enabled}/${stats.total}`}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="custom">Custom</TabsTrigger>
@@ -416,6 +477,14 @@ const Playbooks = () => {
               ? "Aucun agent associé à ce serveur. Associez un agent depuis la page Serveurs."
               : "L'agent est hors ligne. Les ordres seront exécutés à sa prochaine connexion."
             }
+          </div>
+        )}
+
+        {/* API error message */}
+        {playbooksError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            Erreur lors du chargement des playbooks : {playbooksError.message}
           </div>
         )}
 
@@ -480,7 +549,7 @@ const Playbooks = () => {
                       <Button
                         variant="default"
                         size="sm"
-                        disabled={!isRunnerReady || isAutoDiscovering}
+                        disabled={!isRunnerReady || isAutoDiscovering || isLoadingPlaybooks}
                         onClick={handleQuickAutoDiscovery}
                       >
                         {isAutoDiscovering ? (
@@ -524,44 +593,60 @@ const Playbooks = () => {
               {/* Group filter chips */}
               <ScrollArea className="w-full">
                 <div className="flex items-center gap-2 pb-2">
-                  <button
-                    onClick={() => setActiveGroup('all')}
-                    className={`
-                      px-3 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap
-                      ${activeGroup === 'all' 
-                        ? 'bg-primary text-primary-foreground' 
-                        : 'bg-muted text-muted-foreground hover:text-foreground'
-                      }
-                    `}
-                  >
-                    Tous ({ALL_PLAYBOOKS.filter(p => showExpert || p.level === 'simple').length})
-                  </button>
-                  {Object.entries(PLAYBOOK_GROUPS).map(([key, group]) => {
-                    const count = group.playbooks.filter(p => showExpert || p.level === 'simple').length;
-                    if (count === 0) return null;
-                    const GroupIcon = group.icon;
-                    return (
+                  {isLoadingPlaybooks ? (
+                    <div className="flex gap-2">
+                      {[...Array(5)].map((_, i) => (
+                        <Skeleton key={i} className="h-8 w-24 rounded-full" />
+                      ))}
+                    </div>
+                  ) : (
+                    <>
                       <button
-                        key={key}
-                        onClick={() => setActiveGroup(key)}
+                        onClick={() => setActiveGroup('all')}
                         className={`
-                          flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap
-                          ${activeGroup === key 
+                          px-3 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap
+                          ${activeGroup === 'all' 
                             ? 'bg-primary text-primary-foreground' 
                             : 'bg-muted text-muted-foreground hover:text-foreground'
                           }
                         `}
                       >
-                        <GroupIcon className="w-3.5 h-3.5" />
-                        {group.label} ({count})
+                        Tous ({allPlaybooks?.filter(p => showExpert || p.visibility === 'public').length || 0})
                       </button>
-                    );
-                  })}
+                      {Object.entries(groups).map(([key, group]) => {
+                        const count = group.playbooks.filter(p => showExpert || p.visibility === 'public').length;
+                        if (count === 0) return null;
+                        const GroupIcon = group.icon;
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => setActiveGroup(key)}
+                            className={`
+                              flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap
+                              ${activeGroup === key 
+                                ? 'bg-primary text-primary-foreground' 
+                                : 'bg-muted text-muted-foreground hover:text-foreground'
+                              }
+                            `}
+                          >
+                            <GroupIcon className="w-3.5 h-3.5" />
+                            {group.label} ({count})
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
               </ScrollArea>
 
               {/* Playbook grid */}
-              {filteredPlaybooks.length === 0 ? (
+              {isLoadingPlaybooks ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {[...Array(8)].map((_, i) => (
+                    <Skeleton key={i} className="h-40 w-full rounded-xl" />
+                  ))}
+                </div>
+              ) : filteredPlaybooks.length === 0 ? (
                 <div className="glass-panel rounded-xl p-8 text-center text-muted-foreground">
                   Aucun playbook trouvé
                   {searchQuery && ` pour "${searchQuery}"`}
@@ -571,13 +656,13 @@ const Playbooks = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {filteredPlaybooks.map(playbook => (
                     <PlaybookCardGrid
-                      key={playbook.id}
+                      key={playbook.key}
                       playbook={playbook}
                       capabilities={capabilitiesRecord}
                       onExecute={handleExecute}
-                      isLoading={executingId === playbook.id}
+                      isLoading={executingId === playbook.key}
                       disabled={!isRunnerReady}
-                      isEnabled={enabledPlaybooks.has(playbook.id)}
+                      isEnabled={enabledPlaybooks.has(playbook.key)}
                       onToggle={handleToggle}
                     />
                   ))}
