@@ -462,6 +462,460 @@ export type Database = {
           },
         ]
       }
+      playbook_executions: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          executed_by: string | null
+          exit_code: number | null
+          id: string
+          infrastructure_id: string | null
+          input_params: Json | null
+          order_id: string | null
+          playbook_id: string | null
+          playbook_key: string
+          playbook_version: number | null
+          runner_id: string | null
+          started_at: string | null
+          status: string
+          stderr_tail: string | null
+          stdout_tail: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          executed_by?: string | null
+          exit_code?: number | null
+          id?: string
+          infrastructure_id?: string | null
+          input_params?: Json | null
+          order_id?: string | null
+          playbook_id?: string | null
+          playbook_key: string
+          playbook_version?: number | null
+          runner_id?: string | null
+          started_at?: string | null
+          status?: string
+          stderr_tail?: string | null
+          stdout_tail?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          executed_by?: string | null
+          exit_code?: number | null
+          id?: string
+          infrastructure_id?: string | null
+          input_params?: Json | null
+          order_id?: string | null
+          playbook_id?: string | null
+          playbook_key?: string
+          playbook_version?: number | null
+          runner_id?: string | null
+          started_at?: string | null
+          status?: string
+          stderr_tail?: string | null
+          stdout_tail?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playbook_executions_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playbook_executions_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playbook_executions_playbook_id_fkey"
+            columns: ["playbook_id"]
+            isOneToOne: false
+            referencedRelation: "playbooks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      playbook_reviews: {
+        Row: {
+          comments: string | null
+          created_at: string
+          id: string
+          playbook_id: string
+          reviewed_at: string | null
+          reviewer_id: string | null
+          status: string
+          version: number
+        }
+        Insert: {
+          comments?: string | null
+          created_at?: string
+          id?: string
+          playbook_id: string
+          reviewed_at?: string | null
+          reviewer_id?: string | null
+          status?: string
+          version: number
+        }
+        Update: {
+          comments?: string | null
+          created_at?: string
+          id?: string
+          playbook_id?: string
+          reviewed_at?: string | null
+          reviewer_id?: string | null
+          status?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playbook_reviews_playbook_id_fkey"
+            columns: ["playbook_id"]
+            isOneToOne: false
+            referencedRelation: "playbooks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      playbook_scripts: {
+        Row: {
+          checksum: string | null
+          content: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          infrastructure_id: string | null
+          is_synced: boolean | null
+          last_synced_at: string | null
+          name: string
+          path: string
+          runtime: Database["public"]["Enums"]["playbook_runtime"]
+          size_bytes: number | null
+          updated_at: string
+        }
+        Insert: {
+          checksum?: string | null
+          content?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          infrastructure_id?: string | null
+          is_synced?: boolean | null
+          last_synced_at?: string | null
+          name: string
+          path: string
+          runtime: Database["public"]["Enums"]["playbook_runtime"]
+          size_bytes?: number | null
+          updated_at?: string
+        }
+        Update: {
+          checksum?: string | null
+          content?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          infrastructure_id?: string | null
+          is_synced?: boolean | null
+          last_synced_at?: string | null
+          name?: string
+          path?: string
+          runtime?: Database["public"]["Enums"]["playbook_runtime"]
+          size_bytes?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playbook_scripts_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      playbook_templates: {
+        Row: {
+          category: string | null
+          created_at: string
+          created_by: string | null
+          default_config: Json | null
+          description: string | null
+          effects: string[] | null
+          entrypoint_template: string
+          icon: string | null
+          id: string
+          is_official: boolean | null
+          key: string
+          rating_avg: number | null
+          rating_count: number | null
+          requirements: string[] | null
+          risk_level: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime: Database["public"]["Enums"]["playbook_runtime"]
+          schema: Json | null
+          tags: string[] | null
+          title: string
+          updated_at: string
+          usage_count: number | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          default_config?: Json | null
+          description?: string | null
+          effects?: string[] | null
+          entrypoint_template: string
+          icon?: string | null
+          id?: string
+          is_official?: boolean | null
+          key: string
+          rating_avg?: number | null
+          rating_count?: number | null
+          requirements?: string[] | null
+          risk_level?: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime?: Database["public"]["Enums"]["playbook_runtime"]
+          schema?: Json | null
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          usage_count?: number | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          default_config?: Json | null
+          description?: string | null
+          effects?: string[] | null
+          entrypoint_template?: string
+          icon?: string | null
+          id?: string
+          is_official?: boolean | null
+          key?: string
+          rating_avg?: number | null
+          rating_count?: number | null
+          requirements?: string[] | null
+          risk_level?: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime?: Database["public"]["Enums"]["playbook_runtime"]
+          schema?: Json | null
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          usage_count?: number | null
+        }
+        Relationships: []
+      }
+      playbook_test_runs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          duration_ms: number | null
+          exit_code: number | null
+          id: string
+          infrastructure_id: string | null
+          input_params: Json | null
+          playbook_id: string
+          started_at: string | null
+          status: string
+          stderr: string | null
+          stdout: string | null
+          tested_by: string | null
+          version: number
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          exit_code?: number | null
+          id?: string
+          infrastructure_id?: string | null
+          input_params?: Json | null
+          playbook_id: string
+          started_at?: string | null
+          status?: string
+          stderr?: string | null
+          stdout?: string | null
+          tested_by?: string | null
+          version: number
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          duration_ms?: number | null
+          exit_code?: number | null
+          id?: string
+          infrastructure_id?: string | null
+          input_params?: Json | null
+          playbook_id?: string
+          started_at?: string | null
+          status?: string
+          stderr?: string | null
+          stdout?: string | null
+          tested_by?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playbook_test_runs_infrastructure_id_fkey"
+            columns: ["infrastructure_id"]
+            isOneToOne: false
+            referencedRelation: "infrastructures"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playbook_test_runs_playbook_id_fkey"
+            columns: ["playbook_id"]
+            isOneToOne: false
+            referencedRelation: "playbooks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      playbook_versions: {
+        Row: {
+          changelog: string | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          diff_from_previous: Json | null
+          effects: string[] | null
+          entrypoint: string
+          id: string
+          playbook_id: string
+          requirements: string[] | null
+          risk_level: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime: Database["public"]["Enums"]["playbook_runtime"]
+          schema: Json | null
+          timeout_sec: number | null
+          title: string
+          version: number
+          workdir: string | null
+        }
+        Insert: {
+          changelog?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          diff_from_previous?: Json | null
+          effects?: string[] | null
+          entrypoint: string
+          id?: string
+          playbook_id: string
+          requirements?: string[] | null
+          risk_level?: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime: Database["public"]["Enums"]["playbook_runtime"]
+          schema?: Json | null
+          timeout_sec?: number | null
+          title: string
+          version: number
+          workdir?: string | null
+        }
+        Update: {
+          changelog?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          diff_from_previous?: Json | null
+          effects?: string[] | null
+          entrypoint?: string
+          id?: string
+          playbook_id?: string
+          requirements?: string[] | null
+          risk_level?: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime?: Database["public"]["Enums"]["playbook_runtime"]
+          schema?: Json | null
+          timeout_sec?: number | null
+          title?: string
+          version?: number
+          workdir?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playbook_versions_playbook_id_fkey"
+            columns: ["playbook_id"]
+            isOneToOne: false
+            referencedRelation: "playbooks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      playbooks: {
+        Row: {
+          category: string | null
+          created_at: string
+          created_by: string | null
+          current_version: number | null
+          description: string | null
+          effects: string[] | null
+          entrypoint: string
+          id: string
+          key: string
+          requirements: string[] | null
+          risk_level: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime: Database["public"]["Enums"]["playbook_runtime"]
+          schema: Json | null
+          status: Database["public"]["Enums"]["playbook_status"]
+          timeout_sec: number | null
+          title: string
+          updated_at: string
+          visibility: string | null
+          workdir: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_version?: number | null
+          description?: string | null
+          effects?: string[] | null
+          entrypoint: string
+          id?: string
+          key: string
+          requirements?: string[] | null
+          risk_level?: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime?: Database["public"]["Enums"]["playbook_runtime"]
+          schema?: Json | null
+          status?: Database["public"]["Enums"]["playbook_status"]
+          timeout_sec?: number | null
+          title: string
+          updated_at?: string
+          visibility?: string | null
+          workdir?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_version?: number | null
+          description?: string | null
+          effects?: string[] | null
+          entrypoint?: string
+          id?: string
+          key?: string
+          requirements?: string[] | null
+          risk_level?: Database["public"]["Enums"]["playbook_risk_level"] | null
+          runtime?: Database["public"]["Enums"]["playbook_runtime"]
+          schema?: Json | null
+          status?: Database["public"]["Enums"]["playbook_status"]
+          timeout_sec?: number | null
+          title?: string
+          updated_at?: string
+          visibility?: string | null
+          workdir?: string | null
+        }
+        Relationships: []
+      }
       runner_logs: {
         Row: {
           created_at: string
@@ -737,6 +1191,17 @@ export type Database = {
         | "maintenance"
         | "detection"
       order_status: "pending" | "running" | "completed" | "failed" | "cancelled"
+      playbook_risk_level: "low" | "medium" | "high" | "critical"
+      playbook_runtime: "bash" | "python" | "node"
+      playbook_status:
+        | "draft"
+        | "pending_review"
+        | "approved"
+        | "staging_test"
+        | "published"
+        | "rejected"
+        | "test_failed"
+        | "archived"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -906,6 +1371,18 @@ export const Constants = {
         "detection",
       ],
       order_status: ["pending", "running", "completed", "failed", "cancelled"],
+      playbook_risk_level: ["low", "medium", "high", "critical"],
+      playbook_runtime: ["bash", "python", "node"],
+      playbook_status: [
+        "draft",
+        "pending_review",
+        "approved",
+        "staging_test",
+        "published",
+        "rejected",
+        "test_failed",
+        "archived",
+      ],
     },
   },
 } as const

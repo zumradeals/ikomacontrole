@@ -23,7 +23,9 @@ import {
   Zap,
   AlertCircle,
   Plus,
-  Info
+  Info,
+  Sparkles,
+  History
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -40,9 +42,12 @@ import { PlaybookExecutionTracker } from '@/components/playbooks/PlaybookExecuti
 import { PlaybookCreateForm } from '@/components/playbooks/PlaybookCreateForm';
 import { PlaybookDetailSheet } from '@/components/playbooks/PlaybookDetailSheet';
 import { PlaybookExecuteDialog } from '@/components/playbooks/PlaybookExecuteDialog';
+import { PlaybookWizard } from '@/components/playbooks/PlaybookWizard';
+import { PlaybookVersionHistory } from '@/components/playbooks/PlaybookVersionHistory';
 import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
 import { usePlaybooks, PlaybookItem } from '@/hooks/usePlaybooks';
+import { useLocalPlaybooksList, type LocalPlaybook } from '@/hooks/usePlaybookGovernance';
 import { getCapabilityLabel } from '@/hooks/useRunnerCapabilities';
 import { toast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -219,9 +224,12 @@ const Playbooks = () => {
   const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
   const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [wizardDialogOpen, setWizardDialogOpen] = useState(false);
+  const [versionHistoryOpen, setVersionHistoryOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [executeDialogOpen, setExecuteDialogOpen] = useState(false);
   const [selectedPlaybook, setSelectedPlaybook] = useState<PlaybookItem | null>(null);
+  const [selectedLocalPlaybook, setSelectedLocalPlaybook] = useState<LocalPlaybook | null>(null);
   const [isAutoDiscovering, setIsAutoDiscovering] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string>('all');
@@ -230,6 +238,9 @@ const Playbooks = () => {
 
   // Fetch playbooks from API
   const { data: allPlaybooks, isLoading: isLoadingPlaybooks, error: playbooksError, refetch: refetchPlaybooks, isFetching: isRefetchingPlaybooks } = usePlaybooks();
+
+  // Fetch local playbooks from Supabase
+  const { data: localPlaybooks = [] } = useLocalPlaybooksList();
 
   // Initialize enabled playbooks when data loads
   useMemo(() => {
@@ -612,15 +623,29 @@ const Playbooks = () => {
                 </div>
                 
                 <div className="flex items-center gap-4">
+                  {/* Mode Simple: Wizard */}
                   <Button
-                    variant="outline"
                     size="sm"
-                    onClick={() => setCreateDialogOpen(true)}
+                    onClick={() => setWizardDialogOpen(true)}
                     className="gap-2"
                   >
-                    <Plus className="w-4 h-4" />
-                    Créer un playbook
+                    <Sparkles className="w-4 h-4" />
+                    Nouveau (Wizard)
                   </Button>
+                  
+                  {/* Mode Expert: Form */}
+                  {showExpert && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCreateDialogOpen(true)}
+                      className="gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Mode Expert
+                    </Button>
+                  )}
+                  
                   <div className="flex items-center gap-2">
                     <Label htmlFor="expert-mode" className="text-sm text-muted-foreground">
                       Expert
@@ -823,11 +848,24 @@ const Playbooks = () => {
         />
       )}
 
-      {/* Create Playbook Dialog */}
+      {/* Create Playbook Dialog (Expert Mode) */}
       <PlaybookCreateForm
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         serverId={selectedServerId}
+      />
+
+      {/* Wizard Dialog (Simple Mode) */}
+      <PlaybookWizard
+        open={wizardDialogOpen}
+        onOpenChange={setWizardDialogOpen}
+      />
+
+      {/* Version History Sheet */}
+      <PlaybookVersionHistory
+        open={versionHistoryOpen}
+        onOpenChange={setVersionHistoryOpen}
+        playbook={selectedLocalPlaybook}
       />
 
       {/* Playbook Detail Sheet */}
