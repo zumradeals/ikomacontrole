@@ -81,22 +81,15 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
   const status = statusConfig[order.status];
   const cancelOrder = useCancelOrder();
   
-  // Calculate progress percentage based on time or progress field
+  // Use progress from API only - NO frontend estimation
+  // The backend is the source of truth for progress
   const progress = useMemo(() => {
     if (order.status === 'completed') return 100;
     if (order.status === 'failed' || order.status === 'cancelled') return 100;
     if (order.progress !== null && order.progress !== undefined) return order.progress;
     if (order.status === 'pending') return 0;
-    
-    // Estimate progress based on time for running orders
-    if (order.started_at) {
-      const started = new Date(order.started_at).getTime();
-      const now = Date.now();
-      const elapsed = (now - started) / 1000; // seconds
-      // Assume average playbook takes 60 seconds, cap at 95%
-      return Math.min(95, Math.floor((elapsed / 60) * 100));
-    }
-    return 10;
+    // Running without explicit progress: show indeterminate state
+    return null;
   }, [order]);
 
   // Extract playbook ID from description
@@ -140,8 +133,8 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
           </div>
         </div>
 
-        {/* Progress indicator for running */}
-        {order.status === 'running' && (
+        {/* Progress indicator for running - only show if backend provides it */}
+        {order.status === 'running' && progress !== null && (
           <div className="w-16 text-right">
             <span className="text-xs font-mono text-blue-400">{progress}%</span>
           </div>
@@ -154,8 +147,8 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
         )}
       </button>
 
-      {/* Progress bar for running orders */}
-      {order.status === 'running' && (
+      {/* Progress bar for running orders - only if backend provides progress */}
+      {order.status === 'running' && progress !== null && (
         <div className="px-3 pb-2">
           <Progress value={progress} className="h-1.5" />
         </div>

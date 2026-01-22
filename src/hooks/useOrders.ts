@@ -1,28 +1,31 @@
 /**
  * ORDERS HOOK
  * 
- * ARCHITECTURE UPDATE (v2):
- * Orders are now created via the EXTERNAL API (api.ikomadigit.com) because runners
- * poll the external API for orders, not the local Supabase runner-api.
+ * ARCHITECTURE (API-First):
+ * - The external API (api.ikomadigit.com) is the SOURCE OF TRUTH
+ * - Local Supabase is used ONLY for real-time UI updates via Realtime
+ * - Status mapping: API uses QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED
+ *   → Frontend displays as pending/running/completed/failed/cancelled
  * 
- * The external API schema requires:
- * - serverId: UUID of the target server
- * - playbookKey: identifier for the playbook (e.g., "system.autodiscover")
- * - action: "run" | "install" | etc.
- * - idempotencyKey: unique key to prevent duplicates
- * - createdBy: identifier of the user/system creating the order
- * 
- * For backwards compatibility, we also write orders to the local Supabase table
- * for real-time tracking via the PlaybookExecutionTracker component.
+ * The frontend is PASSIVE and DESCRIPTIVE:
+ * - Never recalculates status
+ * - Never interprets playbook results
+ * - Displays reportContract as-is from the API
  */
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import { Json } from '@/integrations/supabase/types';
-import { createOrder as createExternalOrder, listOrders as listExternalOrders, cancelOrder as cancelExternalOrder } from '@/lib/api/ordersAdminProxy';
+import { 
+  createOrder as createExternalOrder, 
+  listOrders as listExternalOrders, 
+  cancelOrder as cancelExternalOrder,
+  type LocalOrderStatus,
+  type ReportContract,
+} from '@/lib/api/ordersAdminProxy';
 
-export type OrderStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type OrderStatus = LocalOrderStatus;
 export type OrderCategory = 'installation' | 'update' | 'security' | 'maintenance' | 'detection';
 
 export interface Order {
@@ -102,36 +105,41 @@ export function useOrders(runnerId?: string, serverId?: string) {
         console.error('Error fetching local orders:', localError);
       }
 
-      // Also try to fetch from external API for status sync
+      // Sync with external API - API is the source of truth
+      // We read from API and update local cache for realtime tracking only
       if (serverId) {
         try {
           const externalResult = await listExternalOrders(serverId);
           if (externalResult.success && externalResult.data) {
-            // Merge external status updates into local data
             const externalMap = new Map(externalResult.data.map(o => [o.id, o]));
             
-            // Update local orders with external status if newer
+            // Update local orders with external status (API is source of truth)
             for (const localOrder of (localData || [])) {
               const external = externalMap.get(localOrder.id);
-              if (external && external.status !== localOrder.status) {
-                // Update local order status from external
-                await supabase
-                  .from('orders')
-                  .update({
-                    status: external.status,
-                    exit_code: external.exitCode,
-                    stdout_tail: external.stdoutTail,
-                    stderr_tail: external.stderrTail,
-                    completed_at: external.completedAt,
-                    started_at: external.startedAt,
-                    result: external.result as Json,
-                  })
-                  .eq('id', localOrder.id);
+              if (external) {
+                // Only update if status changed - passive sync
+                const needsUpdate = external.status !== localOrder.status ||
+                  external.exitCode !== localOrder.exit_code;
+                
+                if (needsUpdate) {
+                  await supabase
+                    .from('orders')
+                    .update({
+                      status: external.status,
+                      exit_code: external.exitCode,
+                      stdout_tail: external.stdoutTail,
+                      stderr_tail: external.stderrTail,
+                      completed_at: external.completedAt,
+                      started_at: external.startedAt,
+                      result: external.result as Json,
+                    })
+                    .eq('id', localOrder.id);
+                }
               }
             }
           }
         } catch (err) {
-          console.warn('Could not sync with external API:', err);
+          console.warn('[useOrders] API sync failed (will retry):', err);
         }
       }
 

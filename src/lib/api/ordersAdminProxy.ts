@@ -380,22 +380,75 @@ export interface CreateOrderInput {
   params?: Record<string, unknown>;
 }
 
+// ============================================
+// Report Contract Types (API v2)
+// ============================================
+
+export type ApiOrderStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export type LocalOrderStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface ReportContractStep {
+  key: string;
+  title: string;
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+  startedAt?: string;
+  endedAt?: string;
+  output?: string;
+  error?: string;
+}
+
+export interface ReportContractError {
+  code: string;
+  message: string;
+}
+
+export interface ReportContract {
+  version: string;
+  compatibleVersions?: string[];
+  summary?: string;
+  durationMs?: number;
+  steps?: ReportContractStep[];
+  errors?: ReportContractError[];
+}
+
 export interface ExternalOrder {
   id: string;
   serverId: string;
   runnerId?: string;
   playbookKey: string;
   action: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: LocalOrderStatus;
   name?: string;
   command?: string;
   exitCode?: number;
   stdoutTail?: string;
   stderrTail?: string;
   result?: Record<string, unknown>;
+  reportContract?: ReportContract;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+}
+
+/**
+ * Map API status (QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED)
+ * to local status (pending, running, completed, failed, cancelled)
+ */
+function mapApiStatus(apiStatus: string): LocalOrderStatus {
+  const statusMap: Record<string, LocalOrderStatus> = {
+    'QUEUED': 'pending',
+    'RUNNING': 'running',
+    'SUCCEEDED': 'completed',
+    'FAILED': 'failed',
+    'CANCELLED': 'cancelled',
+    // Also handle lowercase variants for backwards compatibility
+    'pending': 'pending',
+    'running': 'running',
+    'completed': 'completed',
+    'failed': 'failed',
+    'cancelled': 'cancelled',
+  };
+  return statusMap[apiStatus] ?? 'pending';
 }
 
 function mapOrder(raw: any): ExternalOrder {
@@ -405,13 +458,14 @@ function mapOrder(raw: any): ExternalOrder {
     runnerId: raw.runner_id ?? raw.runnerId,
     playbookKey: raw.playbook_key ?? raw.playbookKey,
     action: raw.action,
-    status: raw.status,
+    status: mapApiStatus(raw.status),
     name: raw.name,
     command: raw.command,
     exitCode: raw.exit_code ?? raw.exitCode,
     stdoutTail: raw.stdout_tail ?? raw.stdoutTail,
     stderrTail: raw.stderr_tail ?? raw.stderrTail,
     result: raw.result,
+    reportContract: raw.reportContract ?? raw.report_contract,
     createdAt: raw.created_at ?? raw.createdAt ?? new Date().toISOString(),
     startedAt: raw.started_at ?? raw.startedAt,
     completedAt: raw.completed_at ?? raw.completedAt,
