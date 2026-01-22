@@ -41,7 +41,7 @@ async function fetchPlaybooks(): Promise<PlaybookItem[]> {
   const { data, error } = await supabase.functions.invoke('admin-proxy', {
     body: {
       method: 'GET',
-      path: '/admin/playbooks',
+      path: '/playbooks',  // Aligned with IKOMA API: GET /v1/playbooks
     },
   });
 
