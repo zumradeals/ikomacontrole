@@ -1,4 +1,4 @@
-import { LayoutDashboard, Server, HardDrive, Terminal, Rocket } from 'lucide-react';
+import { LayoutDashboard, Server, HardDrive, Terminal, Rocket, ClipboardList } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SystemStatus } from '@/components/dashboard/SystemStatus';
 import { ModuleCard } from '@/components/dashboard/ModuleCard';
@@ -6,6 +6,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { QuickActions } from '@/components/dashboard/QuickActions';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { ApiStatusWidget } from '@/components/dashboard/ApiStatusWidget';
+import { DiagnosticsPanel } from '@/components/dashboard/DiagnosticsPanel';
 
 const modules = [
   {
@@ -32,6 +33,13 @@ const modules = [
     status: 'inactive' as const,
   },
   {
+    title: 'Orders',
+    description: 'Gestion des ordres d\'exécution',
+    icon: ClipboardList,
+    path: '/orders',
+    status: 'inactive' as const,
+  },
+  {
     title: 'Déploiements',
     description: 'Déploiement et orchestration de vos applications',
     icon: Rocket,
@@ -55,6 +63,9 @@ const Index = () => {
 
       {/* System Status Metrics */}
       <SystemStatus />
+
+      {/* Diagnostics Panel */}
+      <DiagnosticsPanel />
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

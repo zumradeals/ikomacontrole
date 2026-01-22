@@ -11,6 +11,7 @@ import Auth from "./pages/Auth";
 import Runner from "./pages/Runner";
 import Servers from "./pages/Servers";
 import Playbooks from "./pages/Playbooks";
+import Orders from "./pages/Orders";
 import SupabaseSetup from "./pages/SupabaseSetup";
 import Deployer from "./pages/Deployer";
 import DeployerWizard from "./pages/DeployerWizard";
@@ -41,6 +42,7 @@ const App = () => (
                       <Route path="/servers" element={<Servers />} />
                       <Route path="/platform" element={<Playbooks />} />
                       <Route path="/platform/supabase" element={<SupabaseSetup />} />
+                      <Route path="/orders" element={<Orders />} />
                       <Route path="/deployer" element={<Deployer />} />
                       <Route path="/deployer/new" element={<DeployerWizard />} />
                       <Route path="/gateway" element={<Gateway />} />
