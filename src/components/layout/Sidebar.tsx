@@ -11,7 +11,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Hexagon,
-  Menu
+  Menu,
+  ClipboardList
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
@@ -34,6 +35,7 @@ const navItems: NavItem[] = [
   { path: '/servers', label: 'Serveurs', icon: Server },
   { path: '/runner', label: 'Agents', icon: Terminal },
   { path: '/platform', label: 'Playbooks', icon: HardDrive },
+  { path: '/orders', label: 'Orders', icon: ClipboardList },
   { path: '/deployer', label: 'Déploiements', icon: Rocket, expertOnly: true },
   { path: '/gateway', label: 'Routage', icon: Network, expertOnly: true },
   { path: '/observability', label: 'Observabilité', icon: Eye, expertOnly: true },
