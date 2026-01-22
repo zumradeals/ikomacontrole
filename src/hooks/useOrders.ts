@@ -99,7 +99,54 @@ export function useOrders(runnerId?: string, serverId?: string) {
   return useQuery({
     queryKey: ['orders', runnerId, serverId],
     queryFn: async () => {
-      // Fetch from local Supabase for real-time tracking
+      // First, sync with external API if serverId is available
+      // API is the SOURCE OF TRUTH - sync before returning data
+      if (serverId) {
+        try {
+          const externalResult = await listExternalOrders(serverId);
+          if (externalResult.success && externalResult.data) {
+            // Build a map of external orders by ID
+            const externalOrders = externalResult.data;
+            
+            // Fetch current local orders to compare
+            const { data: currentLocal } = await supabase
+              .from('orders')
+              .select('id, status, exit_code');
+            
+            const localMap = new Map((currentLocal || []).map(o => [o.id, o]));
+            
+            // Update local orders with external status (API is source of truth)
+            for (const external of externalOrders) {
+              const local = localMap.get(external.id);
+              if (local) {
+                // Only update if status changed - passive sync
+                const needsUpdate = toSupabaseStatus(external.status) !== local.status ||
+                  external.exitCode !== local.exit_code;
+                
+                if (needsUpdate) {
+                  console.log(`[useOrders] Syncing order ${external.id}: ${local.status} → ${external.status}`);
+                  await supabase
+                    .from('orders')
+                    .update({
+                      status: toSupabaseStatus(external.status),
+                      exit_code: external.exitCode,
+                      stdout_tail: external.stdoutTail,
+                      stderr_tail: external.stderrTail,
+                      completed_at: external.completedAt,
+                      started_at: external.startedAt,
+                      result: external.result as Json,
+                    })
+                    .eq('id', external.id);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[useOrders] API sync failed (will retry):', err);
+        }
+      }
+
+      // Now fetch the updated local data
       let query = supabase
         .from('orders')
         .select('*')
@@ -113,44 +160,6 @@ export function useOrders(runnerId?: string, serverId?: string) {
       
       if (localError) {
         console.error('Error fetching local orders:', localError);
-      }
-
-      // Sync with external API - API is the source of truth
-      // We read from API and update local cache for realtime tracking only
-      if (serverId) {
-        try {
-          const externalResult = await listExternalOrders(serverId);
-          if (externalResult.success && externalResult.data) {
-            const externalMap = new Map(externalResult.data.map(o => [o.id, o]));
-            
-            // Update local orders with external status (API is source of truth)
-            for (const localOrder of (localData || [])) {
-              const external = externalMap.get(localOrder.id);
-              if (external) {
-                // Only update if status changed - passive sync
-                const needsUpdate = external.status !== localOrder.status ||
-                  external.exitCode !== localOrder.exit_code;
-                
-                if (needsUpdate) {
-                  await supabase
-                    .from('orders')
-                    .update({
-                      status: toSupabaseStatus(external.status),
-                      exit_code: external.exitCode,
-                      stdout_tail: external.stdoutTail,
-                      stderr_tail: external.stderrTail,
-                      completed_at: external.completedAt,
-                      started_at: external.startedAt,
-                      result: external.result as Json,
-                    })
-                    .eq('id', localOrder.id);
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[useOrders] API sync failed (will retry):', err);
-        }
       }
 
       return (localData || []) as Order[];
