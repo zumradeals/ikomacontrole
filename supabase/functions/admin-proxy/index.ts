@@ -77,8 +77,6 @@ serve(async (req) => {
     }
     // DELETE requests: no Content-Type header, no body
 
-    // GET /v1/playbooks - forwarded directly to API (no mock)
-
     const startTime = Date.now();
     const response = await fetch(targetUrl, fetchOptions);
     const duration = Date.now() - startTime;
@@ -180,6 +178,58 @@ serve(async (req) => {
         : [];
       return new Response(
         JSON.stringify(servers),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    // For GET /playbooks, normalize to { items: [...] } with contractual fields
+    if (path === '/playbooks' && httpMethod === 'GET') {
+      // Handle multiple API response formats: { items: [...] }, [...], or { "0": {...}, "1": {...} }
+      let rawPlaybooks: Record<string, unknown>[] = [];
+      
+      if (Array.isArray(responseData?.items)) {
+        rawPlaybooks = responseData.items;
+      } else if (Array.isArray(responseData)) {
+        rawPlaybooks = responseData;
+      } else if (typeof responseData === 'object' && responseData !== null) {
+        // Indexed object format { "0": {...}, "1": {...}, proxy_* }
+        rawPlaybooks = Object.entries(responseData)
+          .filter(([key]) => !key.startsWith('proxy_') && !isNaN(Number(key)))
+          .map(([, value]) => value as Record<string, unknown>);
+      }
+
+      // Normalize each playbook to contractual schema
+      const items = rawPlaybooks.map((raw: Record<string, unknown>) => {
+        // Determine visibility from isPublished or visibility field
+        let visibility: 'internal' | 'public' = 'public';
+        if (raw.visibility === 'internal' || raw.visibility === 'public') {
+          visibility = raw.visibility;
+        } else if (raw.isPublished !== undefined) {
+          const isPublished = raw.isPublished === true || raw.isPublished === 'true';
+          visibility = isPublished ? 'public' : 'internal';
+        }
+
+        return {
+          key: raw.key,
+          version: raw.version || raw.schemaVersion || '1.0',
+          title: raw.title || raw.name || raw.key,
+          description: raw.description || raw.name || raw.key,
+          visibility,
+          actions: Array.isArray(raw.actions) ? raw.actions : ['run'],
+          schema: raw.schema || { type: 'object', properties: {}, required: [] },
+          // Pass through original fields for reference
+          category: raw.category,
+          riskLevel: raw.riskLevel,
+        };
+      });
+
+      console.info(`[admin-proxy] Normalized ${items.length} playbooks`);
+      
+      return new Response(
+        JSON.stringify({ items, ...baseResponse }),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

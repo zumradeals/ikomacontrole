@@ -27,7 +27,8 @@ interface ServiceLogsDialogProps {
 
 const statusConfig = {
   pending: { icon: Clock, label: 'En attente', color: 'bg-muted text-muted-foreground' },
-  running: { icon: Loader2, label: 'En cours', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+  claimed: { icon: Loader2, label: 'Réclamé', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+  running: { icon: Loader2, label: 'En cours', color: 'bg-blue-500/10 text-blue-400 border-blue-500/30' },
   completed: { icon: CheckCircle2, label: 'Terminé', color: 'bg-green-500/10 text-green-400 border-green-500/30' },
   failed: { icon: XCircle, label: 'Échoué', color: 'bg-red-500/10 text-red-400 border-red-500/30' },
   cancelled: { icon: AlertCircle, label: 'Annulé', color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },

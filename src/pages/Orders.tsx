@@ -50,6 +50,7 @@ const Orders = () => {
   const getStatusBadge = (status: string) => {
     const variants: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
       QUEUED: { variant: 'secondary' },
+      CLAIMED: { variant: 'default', className: 'bg-purple-500 text-white' },
       RUNNING: { variant: 'default' },
       SUCCEEDED: { variant: 'default', className: 'bg-success text-success-foreground' },
       FAILED: { variant: 'destructive' },
