@@ -44,6 +44,7 @@ export interface Order {
   stdout_tail: string | null;
   stderr_tail: string | null;
   report_incomplete: boolean | null;
+  report_contract: ReportContract | null;
   meta: Json;
   created_by: string | null;
   created_at: string;

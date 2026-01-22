@@ -1,11 +1,11 @@
 /**
  * ORDERS HISTORY COMPONENT
  * 
- * NOTE: This component reads from the local Supabase 'orders' table.
- * This is intentional because orders are created and managed by this control plane.
- * The 'orders' table IS the source of truth for order execution state.
+ * PASSIVE DISPLAY: Shows order data from API without interpretation.
+ * Uses reportContract when available for structured execution details.
  * 
- * This is different from 'runners' where the external API is the source of truth.
+ * Local Supabase 'orders' table is used for real-time tracking,
+ * but the external API is the source of truth for status/results.
  */
 
 import { useEffect } from 'react';
@@ -37,6 +37,7 @@ import { formatDistanceToNow, format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { useState } from 'react';
 import { Order, OrderCategory, OrderStatus, useCancelOrder } from '@/hooks/useOrders';
+import { OrderReportView } from '@/components/orders/OrderReportView';
 
 interface OrdersHistoryProps {
   runnerId: string;
@@ -181,8 +182,13 @@ function OrderItem({ order }: { order: Order }) {
               </div>
             )}
 
-            {/* Stderr tail (for failed orders) */}
-            {order.status === 'failed' && order.stderr_tail && (
+            {/* Report Contract - primary display when available */}
+            {order.report_contract && (
+              <OrderReportView reportContract={order.report_contract} />
+            )}
+
+            {/* Fallback: Stderr tail (for failed orders) - only if no reportContract */}
+            {!order.report_contract && order.status === 'failed' && order.stderr_tail && (
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1">Stderr (extrait)</p>
                 <pre className="text-xs bg-red-500/5 border border-red-500/20 p-2 rounded overflow-x-auto font-mono max-h-32 text-red-300">
@@ -191,8 +197,8 @@ function OrderItem({ order }: { order: Order }) {
               </div>
             )}
 
-            {/* Stdout tail */}
-            {order.stdout_tail && (
+            {/* Fallback: Stdout tail - only if no reportContract */}
+            {!order.report_contract && order.stdout_tail && (
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1">Stdout (extrait)</p>
                 <pre className="text-xs bg-background/50 p-2 rounded overflow-x-auto font-mono max-h-32">
@@ -201,8 +207,8 @@ function OrderItem({ order }: { order: Order }) {
               </div>
             )}
 
-            {/* Result */}
-            {order.result && Object.keys(order.result as object).length > 0 && order.status === 'completed' && (
+            {/* Fallback: Result JSON - only if no reportContract */}
+            {!order.report_contract && order.result && Object.keys(order.result as object).length > 0 && order.status === 'completed' && (
               <div>
                 <p className="text-xs font-medium text-muted-foreground mb-1">Résultat</p>
                 <pre className="text-xs bg-background/50 p-2 rounded overflow-x-auto font-mono max-h-32">
