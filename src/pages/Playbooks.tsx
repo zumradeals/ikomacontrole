@@ -98,6 +98,7 @@ interface PlaybookCardGridProps {
   playbook: PlaybookItem;
   capabilities: Record<string, string>;
   onExecute: (playbook: PlaybookItem) => void;
+  onDetails: (playbook: PlaybookItem) => void;
   isLoading: boolean;
   disabled: boolean;
   isEnabled: boolean;
@@ -108,6 +109,7 @@ function PlaybookCardGrid({
   playbook, 
   capabilities, 
   onExecute, 
+  onDetails,
   isLoading, 
   disabled,
   isEnabled,
@@ -181,20 +183,31 @@ function PlaybookCardGrid({
           <Clock className="w-3 h-3" />
           v{playbook.version}
         </div>
-        <Button 
-          size="sm" 
-          variant={isEnabled ? "default" : "outline"}
-          onClick={() => onExecute(playbook)}
-          disabled={isLoading || disabled || !isEnabled}
-          className="h-7 text-xs gap-1"
-        >
-          {isLoading ? (
-            <Loader2 className="w-3 h-3 animate-spin" />
-          ) : (
-            <Play className="w-3 h-3" />
-          )}
-          Exécuter
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button 
+            size="sm" 
+            variant="ghost"
+            onClick={() => onDetails(playbook)}
+            className="h-7 text-xs gap-1"
+          >
+            <Info className="w-3 h-3" />
+            Détails
+          </Button>
+          <Button 
+            size="sm" 
+            variant={isEnabled ? "default" : "outline"}
+            onClick={() => onExecute(playbook)}
+            disabled={isLoading || disabled || !isEnabled}
+            className="h-7 text-xs gap-1"
+          >
+            {isLoading ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Play className="w-3 h-3" />
+            )}
+            Exécuter
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -599,6 +612,15 @@ const Playbooks = () => {
                 </div>
                 
                 <div className="flex items-center gap-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCreateDialogOpen(true)}
+                    className="gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Créer un playbook
+                  </Button>
                   <div className="flex items-center gap-2">
                     <Label htmlFor="expert-mode" className="text-sm text-muted-foreground">
                       Expert
@@ -682,6 +704,10 @@ const Playbooks = () => {
                       playbook={playbook}
                       capabilities={capabilitiesRecord}
                       onExecute={handleExecute}
+                      onDetails={(p) => {
+                        setSelectedPlaybook(p);
+                        setDetailSheetOpen(true);
+                      }}
                       isLoading={executingId === playbook.key}
                       disabled={!isRunnerReady}
                       isEnabled={enabledPlaybooks.has(playbook.key)}
