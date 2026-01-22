@@ -67,7 +67,12 @@ const statusConfig: Record<OrderStatus, { icon: React.ReactNode; label: string; 
     class: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
   },
   running: {
-    icon: <Loader2 className="w-4 h-4 animate-spin" />,
+    icon: (
+      <span className="relative flex h-4 w-4 items-center justify-center">
+        <span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-blue-400 opacity-75"></span>
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+      </span>
+    ),
     label: 'En cours',
     class: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
   },
