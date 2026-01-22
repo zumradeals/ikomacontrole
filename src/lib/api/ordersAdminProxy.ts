@@ -141,10 +141,22 @@ async function edgeFunctionRequest<T = unknown>(request: ProxyRequest): Promise<
 
     // Check if the response itself indicates an error
     if (data?.error) {
+      // Improve error message for API errors
+      let errorMessage = data.error;
+      
+      // Detect FK constraint errors and provide a clearer message
+      if (typeof errorMessage === 'string' && errorMessage.includes('Failed query')) {
+        if (errorMessage.includes('runner_id') || errorMessage.includes('server_id')) {
+          errorMessage = "L'API externe n'a pas pu créer l'ordre. Vérifiez que le serveur est correctement associé à un agent actif.";
+        } else {
+          errorMessage = "L'API externe a rencontré une erreur de base de données. Veuillez réessayer ou contacter le support.";
+        }
+      }
+      
       addLog({ ...logEntry, success: false, error: data.error });
       return {
         success: false,
-        error: data.error,
+        error: errorMessage,
         statusCode: data.proxy_status || 400,
       };
     }
@@ -371,6 +383,7 @@ export async function detachRunnerFromServer(_runnerId: string, serverId?: strin
 
 export interface CreateOrderInput {
   serverId: string;
+  runnerId?: string; // Optional: Some APIs require explicit runnerId
   playbookKey: string;
   action: string;
   createdBy: string;
@@ -505,20 +518,28 @@ export async function createOrder(input: CreateOrderInput): Promise<ApiResponse<
   // Generate idempotency key
   const idempotencyKey = `${input.serverId}-${input.playbookKey}-${Date.now()}`;
   
+  // Build request body - include runnerId if provided (some APIs require it explicitly)
+  const body: Record<string, unknown> = {
+    serverId: input.serverId,
+    playbookKey: input.playbookKey,
+    action: input.action,
+    idempotencyKey,
+    createdBy: input.createdBy,
+    name: input.name,
+    command: input.command,
+    description: input.description,
+    params: input.params,
+  };
+  
+  // Include runnerId if provided - API may need it for foreign key constraint
+  if (input.runnerId) {
+    body.runnerId = input.runnerId;
+  }
+  
   const response = await edgeFunctionRequest<any>({
     method: 'POST',
     path: '/orders',
-    body: {
-      serverId: input.serverId,
-      playbookKey: input.playbookKey,
-      action: input.action,
-      idempotencyKey,
-      createdBy: input.createdBy,
-      name: input.name,
-      command: input.command,
-      description: input.description,
-      params: input.params,
-    },
+    body,
   });
 
   if (!response.success || !response.data) {
