@@ -8,15 +8,16 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { Send, RefreshCw, StopCircle, CheckCircle2, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { Send, RefreshCw, StopCircle, CheckCircle2, XCircle, Clock, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createOrder, getOrder, STATIC_PLAYBOOKS, type IkomaOrder } from '@/lib/api/ikomaApi';
+import { createOrder, getOrder, type IkomaOrder } from '@/lib/api/ikomaApi';
 import { listServers, type ProxyServer } from '@/lib/api/ordersAdminProxy';
+import { usePlaybooks } from '@/hooks/usePlaybooks';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
@@ -28,7 +29,7 @@ export function OrderCreateForm({ onOrderCreated }: OrderCreateFormProps) {
   const [servers, setServers] = useState<ProxyServer[]>([]);
   const [serverId, setServerId] = useState('');
   const [playbookKey, setPlaybookKey] = useState('');
-  const [action, setAction] = useState('execute');
+  const [action, setAction] = useState('run');
   const [createdBy, setCreatedBy] = useState('dashboard');
   
   const [submitting, setSubmitting] = useState(false);
@@ -36,6 +37,9 @@ export function OrderCreateForm({ onOrderCreated }: OrderCreateFormProps) {
   const [currentOrder, setCurrentOrder] = useState<IkomaOrder | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Charger les playbooks depuis l'API (source de vérité unique)
+  const { data: playbooks, isLoading: playbooksLoading, error: playbooksError } = usePlaybooks();
 
   // Charger les serveurs
   useEffect(() => {
@@ -186,21 +190,47 @@ export function OrderCreateForm({ onOrderCreated }: OrderCreateFormProps) {
             )}
           </div>
 
-          {/* Playbook Selection */}
+          {/* Playbook Selection - Source dynamique depuis API */}
           <div className="space-y-2">
             <Label htmlFor="order-playbook">Playbook Key *</Label>
-            <Select value={playbookKey} onValueChange={setPlaybookKey}>
-              <SelectTrigger id="order-playbook">
-                <SelectValue placeholder="Sélectionner un playbook" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATIC_PLAYBOOKS.map((pb) => (
-                  <SelectItem key={pb.key} value={pb.key}>
-                    {pb.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {playbooksLoading ? (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Chargement des playbooks...
+              </div>
+            ) : playbooksError ? (
+              <div className="text-destructive text-sm py-2">
+                Erreur: {playbooksError instanceof Error ? playbooksError.message : 'Chargement échoué'}
+              </div>
+            ) : (
+              <Select value={playbookKey} onValueChange={(key) => {
+                setPlaybookKey(key);
+                // Auto-set action from playbook schema
+                const pb = playbooks?.find(p => p.key === key);
+                if (pb?.actions?.length) {
+                  setAction(pb.actions[0]);
+                }
+              }}>
+                <SelectTrigger id="order-playbook">
+                  <SelectValue placeholder="Sélectionner un playbook" />
+                </SelectTrigger>
+                <SelectContent>
+                  {playbooks?.map((pb) => (
+                    <SelectItem key={pb.key} value={pb.key}>
+                      <div className="flex flex-col">
+                        <span>{pb.title}</span>
+                        <span className="text-xs text-muted-foreground">{pb.key}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {playbookKey && playbooks && (
+              <p className="text-xs text-muted-foreground">
+                {playbooks.find(p => p.key === playbookKey)?.description}
+              </p>
+            )}
           </div>
 
           {/* Action */}
