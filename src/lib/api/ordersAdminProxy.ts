@@ -223,7 +223,11 @@ export function mapServer(raw: any): ProxyServer {
 // Operations
 // ============================================
 
-export async function listRunners(): Promise<ApiResponse<ProxyRunner[]>> {
+/**
+ * Contract: admin-proxy returns { items: [...], proxy_* }
+ * This function returns the full response for hooks to consume via .items
+ */
+export async function listRunners(): Promise<ApiResponse<{ items: ProxyRunner[] }>> {
   const response = await edgeFunctionRequest<any>({
     method: 'GET',
     path: '/runners',
@@ -233,17 +237,23 @@ export async function listRunners(): Promise<ApiResponse<ProxyRunner[]>> {
     return { success: false, error: response.error };
   }
 
-  // Handle both { runners: [...] } and direct array formats
+  // Handle { items: [...] } contract and legacy formats
   const rawData = response.data;
-  const rawRunners = Array.isArray(rawData) 
-    ? rawData 
-    : Array.isArray(rawData?.runners) 
-      ? rawData.runners 
-      : [];
+  let rawItems: any[];
+  
+  if (Array.isArray(rawData.items)) {
+    rawItems = rawData.items;
+  } else if (Array.isArray(rawData)) {
+    rawItems = rawData;
+  } else if (Array.isArray(rawData.runners)) {
+    rawItems = rawData.runners;
+  } else {
+    rawItems = [];
+  }
   
   return {
     success: true,
-    data: rawRunners.map(mapRunner),
+    data: { items: rawItems.map(mapRunner) },
   };
 }
 
@@ -256,13 +266,17 @@ export async function getRunnerById(id: string): Promise<ApiResponse<ProxyRunner
   const list = await listRunners();
   if (!list.success || !list.data) return { success: false, error: list.error };
   
-  const runner = list.data.find(r => r.id === id);
+  const runner = list.data.items.find(r => r.id === id);
   if (!runner) return { success: false, error: 'Runner not found in list', statusCode: 404 };
   
   return { success: true, data: runner };
 }
 
-export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
+/**
+ * Contract: admin-proxy returns { items: [...], proxy_* }
+ * This function returns the full response for hooks to consume via .items
+ */
+export async function listServers(): Promise<ApiResponse<{ items: ProxyServer[] }>> {
   const response = await edgeFunctionRequest<any>({
     method: 'GET',
     path: '/servers',
@@ -272,17 +286,23 @@ export async function listServers(): Promise<ApiResponse<ProxyServer[]>> {
     return { success: false, error: response.error };
   }
 
-  // Handle both { servers: [...] } and direct array formats
+  // Handle { items: [...] } contract and legacy formats
   const rawData = response.data;
-  const rawServers = Array.isArray(rawData) 
-    ? rawData 
-    : Array.isArray(rawData?.servers) 
-      ? rawData.servers 
-      : [];
+  let rawItems: any[];
+  
+  if (Array.isArray(rawData.items)) {
+    rawItems = rawData.items;
+  } else if (Array.isArray(rawData)) {
+    rawItems = rawData;
+  } else if (Array.isArray(rawData.servers)) {
+    rawItems = rawData.servers;
+  } else {
+    rawItems = [];
+  }
 
   return {
     success: true,
-    data: rawServers.map(mapServer),
+    data: { items: rawItems.map(mapServer) },
   };
 }
 

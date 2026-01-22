@@ -46,7 +46,8 @@ export function OrderCreateForm({ onOrderCreated }: OrderCreateFormProps) {
     async function loadServers() {
       const result = await listServers();
       if (result.success && result.data) {
-        setServers(result.data);
+        // Contract: admin-proxy returns { items: [...] }
+        setServers(result.data.items ?? []);
       }
     }
     loadServers();

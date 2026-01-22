@@ -196,8 +196,8 @@ export async function runApiContractDiagnostic(): Promise<ApiContractDiagnostic>
       errorMessage: runnersResult.error,
     });
 
-    if (runnersResult.success && runnersResult.data?.length) {
-      sampleRunner = runnersResult.data[0];
+    if (runnersResult.success && runnersResult.data?.items?.length) {
+      sampleRunner = runnersResult.data.items[0];
     }
   } catch (err) {
     console.error('[ApiContractDiagnostic] GET /runners failed:', err);
@@ -233,8 +233,8 @@ export async function runApiContractDiagnostic(): Promise<ApiContractDiagnostic>
                     serversResult.statusCode === 404 ? 'Endpoint non implémenté (404)' : serversResult.error,
     });
 
-    if (serversResult.success && serversResult.data?.length) {
-      sampleServer = serversResult.data[0];
+    if (serversResult.success && serversResult.data?.items?.length) {
+      sampleServer = serversResult.data.items[0];
     }
   } catch (err) {
     console.error('[ApiContractDiagnostic] GET /servers failed:', err);
@@ -391,7 +391,7 @@ export async function checkRunnerAssociationVerifiable(
     // Try from list of runners
     const listResult = await listRunners();
     if (listResult.success && listResult.data) {
-      const runner = listResult.data.find(r => r.id === runnerId);
+      const runner = listResult.data.items.find(r => r.id === runnerId);
       if (runner) {
         const actualInfraId = runner.infrastructureId || runner.serverId;
         if (actualInfraId) {
@@ -414,7 +414,7 @@ export async function checkRunnerAssociationVerifiable(
     // Try from servers list
     const serversResult = await listServers();
     if (serversResult.success && serversResult.data) {
-      const server = serversResult.data.find(s => s.id === expectedInfraId);
+      const server = serversResult.data.items.find(s => s.id === expectedInfraId);
       if (server?.runnerId) {
         return {
           verifiable: true,

@@ -133,8 +133,9 @@ serve(async (req) => {
             createdAt: runner.created_at || runner.createdAt,
           }))
         : [];
+      console.info(`[admin-proxy] Normalized ${runners.length} runners`);
       return new Response(
-        JSON.stringify(runners),
+        JSON.stringify({ items: runners, ...baseResponse }),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
@@ -176,8 +177,9 @@ serve(async (req) => {
             updatedAt: server.updated_at || server.updatedAt,
           }))
         : [];
+      console.info(`[admin-proxy] Normalized ${servers.length} servers`);
       return new Response(
-        JSON.stringify(servers),
+        JSON.stringify({ items: servers, ...baseResponse }),
         { 
           status: 200, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 

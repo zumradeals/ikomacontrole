@@ -46,7 +46,8 @@ export function useApiServers() {
         console.warn('[useApiServers] API /servers not available:', result.error);
         return [];
       }
-      return result.data || [];
+      // Contract: admin-proxy returns { items: [...] }
+      return result.data?.items ?? [];
     },
     refetchInterval: 15000,
     staleTime: 10000,
@@ -66,7 +67,8 @@ export function useApiRunners() {
         console.warn('[useApiRunners] API /runners not available:', result.error);
         return [];
       }
-      return result.data || [];
+      // Contract: admin-proxy returns { items: [...] }
+      return result.data?.items ?? [];
     },
     refetchInterval: 15000,
     staleTime: 10000,

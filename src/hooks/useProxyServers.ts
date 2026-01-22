@@ -55,7 +55,8 @@ export function useProxyRunnersV2() {
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch runners');
       }
-      return result.data || [];
+      // Contract: admin-proxy returns { items: [...] }
+      return result.data?.items ?? [];
     },
     refetchInterval: 15000,
     staleTime: 10000,
@@ -320,7 +321,7 @@ export function useCreateAndAttachRunner() {
       // Fetch all runners and find the one we just created
       const listResult = await listRunners();
       const createdRunner = listResult.success && listResult.data 
-        ? listResult.data.find(r => r.id === runner.id)
+        ? listResult.data.items.find(r => r.id === runner.id)
         : null;
       
       const isAttached = createdRunner && 
@@ -399,7 +400,7 @@ export function useVerifyRunnerAssociation() {
         return { verified: false, actualInfraId: null, runner: null };
       }
 
-      const runner = result.data.find(r => r.id === runnerId);
+      const runner = result.data.items.find(r => r.id === runnerId);
       if (!runner) {
         return { verified: false, actualInfraId: null, runner: null };
       }

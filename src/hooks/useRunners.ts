@@ -77,7 +77,9 @@ export function useRunners() {
         throw new Error(result.error || 'Failed to fetch runners');
       }
 
-      const runners = (result.data || []).map(mapProxyRunnerToLegacy);
+      // Contract: admin-proxy returns { items: [...] }
+      const items = result.data?.items ?? [];
+      const runners = items.map(mapProxyRunnerToLegacy);
       console.log(`[useRunners] Loaded ${runners.length} runners from API`);
       return runners;
     },
