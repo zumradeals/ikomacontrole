@@ -237,10 +237,24 @@ serve(async (req) => {
       );
     }
 
-    // Default: return the data as is but wrapped with proxy info if it's an object
-    const finalData = (typeof responseData === 'object' && responseData !== null)
-      ? { ...responseData, ...baseResponse }
-      : responseData;
+    // Default: NEVER spread an array into an object - preserve array structure
+    // Arrays are wrapped as { items: [...], ...proxyMeta }
+    // Objects are merged with proxyMeta
+    // Primitives are returned as-is
+    let finalData: unknown;
+    
+    if (Array.isArray(responseData)) {
+      // CRITICAL FIX: Arrays must never be spread into objects
+      // Return as { items: [...], proxy_* } to preserve structure
+      finalData = { items: responseData, ...baseResponse };
+      console.info(`[admin-proxy] Wrapped array response (${responseData.length} items) for ${path}`);
+    } else if (typeof responseData === 'object' && responseData !== null) {
+      // Safe to spread objects
+      finalData = { ...responseData, ...baseResponse };
+    } else {
+      // Primitives (string, number, etc.) - return as-is
+      finalData = responseData;
+    }
 
     return new Response(
       JSON.stringify(finalData),
