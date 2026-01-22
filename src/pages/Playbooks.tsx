@@ -21,7 +21,9 @@ import {
   HardDrive,
   Database,
   Zap,
-  AlertCircle
+  AlertCircle,
+  Plus,
+  Info
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -35,6 +37,9 @@ import { ServerSelector } from '@/components/platform/ServerSelector';
 import { AutoDetectDialog } from '@/components/infra/AutoDetectDialog';
 import { CustomOrderDialog } from '@/components/infra/CustomOrderDialog';
 import { PlaybookExecutionTracker } from '@/components/playbooks/PlaybookExecutionTracker';
+import { PlaybookCreateForm } from '@/components/playbooks/PlaybookCreateForm';
+import { PlaybookDetailSheet } from '@/components/playbooks/PlaybookDetailSheet';
+import { PlaybookExecuteDialog } from '@/components/playbooks/PlaybookExecuteDialog';
 import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
 import { usePlaybooks, PlaybookItem } from '@/hooks/usePlaybooks';
@@ -200,6 +205,10 @@ const Playbooks = () => {
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [autoDetectDialogOpen, setAutoDetectDialogOpen] = useState(false);
   const [customOrderDialogOpen, setCustomOrderDialogOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [detailSheetOpen, setDetailSheetOpen] = useState(false);
+  const [executeDialogOpen, setExecuteDialogOpen] = useState(false);
+  const [selectedPlaybook, setSelectedPlaybook] = useState<PlaybookItem | null>(null);
   const [isAutoDiscovering, setIsAutoDiscovering] = useState(false);
   const [showExpert, setShowExpert] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string>('all');
@@ -785,6 +794,37 @@ const Playbooks = () => {
             name: associatedRunner.name,
             status: associatedRunner.status === 'ONLINE' ? 'online' : 'offline',
           }}
+        />
+      )}
+
+      {/* Create Playbook Dialog */}
+      <PlaybookCreateForm
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        serverId={selectedServerId}
+      />
+
+      {/* Playbook Detail Sheet */}
+      <PlaybookDetailSheet
+        open={detailSheetOpen}
+        onOpenChange={setDetailSheetOpen}
+        playbookKey={selectedPlaybook?.key || null}
+        onExecute={(pb) => {
+          setDetailSheetOpen(false);
+          setSelectedPlaybook(pb as unknown as PlaybookItem);
+          setExecuteDialogOpen(true);
+        }}
+      />
+
+      {/* Execute Dialog */}
+      {selectedPlaybook && associatedRunner && selectedServerId && (
+        <PlaybookExecuteDialog
+          open={executeDialogOpen}
+          onOpenChange={setExecuteDialogOpen}
+          playbook={selectedPlaybook}
+          serverId={selectedServerId}
+          runnerId={associatedRunner.id}
+          serverName={selectedServer?.name}
         />
       )}
     </div>
