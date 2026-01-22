@@ -518,7 +518,8 @@ export async function createOrder(input: CreateOrderInput): Promise<ApiResponse<
   // Generate idempotency key
   const idempotencyKey = `${input.serverId}-${input.playbookKey}-${Date.now()}`;
   
-  // Build request body - include runnerId if provided (some APIs require it explicitly)
+  // Build request body (aligned with IKOMA Orders API contract)
+  // Contract: { serverId, playbookKey, action, idempotencyKey, createdBy, params? }
   const body: Record<string, unknown> = {
     serverId: input.serverId,
     playbookKey: input.playbookKey,
@@ -530,11 +531,6 @@ export async function createOrder(input: CreateOrderInput): Promise<ApiResponse<
     description: input.description,
     params: input.params,
   };
-  
-  // Include runnerId if provided - API may need it for foreign key constraint
-  if (input.runnerId) {
-    body.runnerId = input.runnerId;
-  }
   
   const response = await edgeFunctionRequest<any>({
     method: 'POST',

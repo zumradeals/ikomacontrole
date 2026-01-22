@@ -180,7 +180,6 @@ export function useCreateOrder() {
       if (serverId) {
         const externalResult = await createExternalOrder({
           serverId,
-          runnerId: input.runner_id, // Pass runnerId explicitly for API foreign key constraint
           playbookKey,
           action,
           createdBy: 'dashboard',
