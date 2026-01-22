@@ -131,10 +131,24 @@ Ce fix s'applique à **tous les endpoints** automatiquement :
 
 | Endpoint | Avant (bug) | Après (fix) |
 |----------|-------------|-------------|
-| `/runners` | `{0:..., 1:...}` | `[...]` (normalisé spécifiquement) |
-| `/servers` | `{0:..., 1:...}` | `[...]` (normalisé spécifiquement) |
-| `/playbooks` | `{0:..., 1:...}` | `{ items: [...] }` (contrat) |
-| `/orders` | `{0:..., 1:...}` | `{ items: [...] }` |
+| `/runners` | `{0:..., 1:...}` | `{ items: [...], proxy_* }` |
+| `/servers` | `{0:..., 1:...}` | `{ items: [...], proxy_* }` |
+| `/playbooks` | `{0:..., 1:...}` | `{ items: [...], proxy_* }` |
+| `/orders` | `{0:..., 1:...}` | `{ items: [...], proxy_* }` |
+
+### Contrat Final (Frontend)
+
+**Tous les hooks lisent via `data.items`** :
+```typescript
+// ✅ Pattern uniforme pour toutes les listes
+const result = await listServers();
+const servers = result.data?.items ?? [];
+
+const result = await listRunners();
+const runners = result.data?.items ?? [];
+
+const { items } = data; // Direct access from admin-proxy response
+```
 
 ---
 

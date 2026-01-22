@@ -66,9 +66,10 @@ export function useProxyRunners() {
         throw new Error(data.error);
       }
 
-      const runners = data?.runners || data || [];
-      console.log('FETCH_RUNNERS_SUCCESS', { count: Array.isArray(runners) ? runners.length : 0 });
-      return Array.isArray(runners) ? runners : [];
+      // Contract: admin-proxy returns { items: [...] } for all list endpoints
+      const items = data?.items ?? data?.runners ?? data ?? [];
+      console.log('FETCH_RUNNERS_SUCCESS', { count: Array.isArray(items) ? items.length : 0 });
+      return Array.isArray(items) ? items : [];
     },
     refetchInterval: 15000,
     staleTime: 10000,

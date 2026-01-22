@@ -38,10 +38,12 @@ export function DiagnosticsPanel() {
       setLoadingServers(true);
       const result = await listServers();
       if (result.success && result.data) {
-        setServers(result.data);
+        // Contract: admin-proxy returns { items: [...] }
+        const items = result.data.items ?? [];
+        setServers(items);
         // Pré-sélectionner le premier serveur si disponible
-        if (result.data.length > 0 && !serverId) {
-          setServerId(result.data[0].id);
+        if (items.length > 0 && !serverId) {
+          setServerId(items[0].id);
         }
       }
       setLoadingServers(false);
