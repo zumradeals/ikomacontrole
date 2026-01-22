@@ -44,6 +44,7 @@ import { PlaybookDetailSheet } from '@/components/playbooks/PlaybookDetailSheet'
 import { PlaybookExecuteDialog } from '@/components/playbooks/PlaybookExecuteDialog';
 import { PlaybookWizard } from '@/components/playbooks/PlaybookWizard';
 import { PlaybookVersionHistory } from '@/components/playbooks/PlaybookVersionHistory';
+import { PlaybookReviewPanel } from '@/components/playbooks/PlaybookReviewPanel';
 import { usePlaybookServices } from '@/hooks/usePlaybookServices';
 import { useCreateOrder, OrderCategory } from '@/hooks/useOrders';
 import { usePlaybooks, PlaybookItem } from '@/hooks/usePlaybooks';
@@ -462,6 +463,14 @@ const Playbooks = () => {
               </Badge>
             </TabsTrigger>
             <TabsTrigger value="custom">Custom</TabsTrigger>
+            <TabsTrigger value="validation">
+              Validation
+              {localPlaybooks.filter(p => p.status === 'pending_review').length > 0 && (
+                <Badge variant="destructive" className="ml-2 text-xs">
+                  {localPlaybooks.filter(p => p.status === 'pending_review').length}
+                </Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="history">Historique</TabsTrigger>
           </TabsList>
           
@@ -775,6 +784,11 @@ const Playbooks = () => {
               </Button>
             </div>
           )}
+        </TabsContent>
+
+        {/* Validation Tab - Admin Review Panel */}
+        <TabsContent value="validation" className="space-y-4">
+          <PlaybookReviewPanel />
         </TabsContent>
 
         {/* History Tab */}
