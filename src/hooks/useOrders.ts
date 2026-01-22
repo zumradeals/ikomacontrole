@@ -84,6 +84,14 @@ function categoryToAction(category: OrderCategory): string {
   }
 }
 
+// Map LocalOrderStatus to Supabase order_status enum
+// Note: 'claimed' is mapped to 'running' for Supabase storage since the DB enum doesn't have 'claimed'
+type SupabaseOrderStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+function toSupabaseStatus(status: LocalOrderStatus): SupabaseOrderStatus {
+  if (status === 'claimed') return 'running';
+  return status;
+}
+
 /**
  * Fetch orders from external API and merge with local Supabase for real-time updates.
  */
@@ -127,7 +135,7 @@ export function useOrders(runnerId?: string, serverId?: string) {
                   await supabase
                     .from('orders')
                     .update({
-                      status: external.status,
+                      status: toSupabaseStatus(external.status),
                       exit_code: external.exitCode,
                       stdout_tail: external.stdoutTail,
                       stderr_tail: external.stderrTail,

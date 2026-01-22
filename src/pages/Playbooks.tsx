@@ -207,7 +207,7 @@ const Playbooks = () => {
   const [enabledPlaybooks, setEnabledPlaybooks] = useState<Set<string>>(new Set());
 
   // Fetch playbooks from API
-  const { data: allPlaybooks, isLoading: isLoadingPlaybooks, error: playbooksError } = usePlaybooks();
+  const { data: allPlaybooks, isLoading: isLoadingPlaybooks, error: playbooksError, refetch: refetchPlaybooks, isFetching: isRefetchingPlaybooks } = usePlaybooks();
 
   // Initialize enabled playbooks when data loads
   useMemo(() => {
@@ -420,16 +420,29 @@ const Playbooks = () => {
       />
 
       <Tabs defaultValue="catalog" className="space-y-6">
-        <TabsList className="glass-panel p-1">
-          <TabsTrigger value="catalog">
-            Catalogue
-            <Badge variant="secondary" className="ml-2 text-xs">
-              {isLoadingPlaybooks ? '...' : `${stats.enabled}/${stats.total}`}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="custom">Custom</TabsTrigger>
-          <TabsTrigger value="history">Historique</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between">
+          <TabsList className="glass-panel p-1">
+            <TabsTrigger value="catalog">
+              Catalogue
+              <Badge variant="secondary" className="ml-2 text-xs">
+                {isLoadingPlaybooks ? '...' : `${stats.enabled}/${stats.total}`}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger value="custom">Custom</TabsTrigger>
+            <TabsTrigger value="history">Historique</TabsTrigger>
+          </TabsList>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetchPlaybooks()}
+            disabled={isRefetchingPlaybooks}
+            className="gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefetchingPlaybooks ? 'animate-spin' : ''}`} />
+            Rafraîchir
+          </Button>
+        </div>
 
         {/* Server Selector */}
         <div className="glass-panel rounded-xl p-4">

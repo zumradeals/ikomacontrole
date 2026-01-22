@@ -397,8 +397,8 @@ export interface CreateOrderInput {
 // Report Contract Types (API v2)
 // ============================================
 
-export type ApiOrderStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
-export type LocalOrderStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type ApiOrderStatus = 'QUEUED' | 'CLAIMED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
+export type LocalOrderStatus = 'pending' | 'claimed' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ReportContractStep {
   key: string;
@@ -444,18 +444,20 @@ export interface ExternalOrder {
 }
 
 /**
- * Map API status (QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED)
- * to local status (pending, running, completed, failed, cancelled)
+ * Map API status (QUEUED, CLAIMED, RUNNING, SUCCEEDED, FAILED, CANCELLED)
+ * to local status (pending, claimed, running, completed, failed, cancelled)
  */
 function mapApiStatus(apiStatus: string): LocalOrderStatus {
   const statusMap: Record<string, LocalOrderStatus> = {
     'QUEUED': 'pending',
+    'CLAIMED': 'claimed',
     'RUNNING': 'running',
     'SUCCEEDED': 'completed',
     'FAILED': 'failed',
     'CANCELLED': 'cancelled',
     // Also handle lowercase variants for backwards compatibility
     'pending': 'pending',
+    'claimed': 'claimed',
     'running': 'running',
     'completed': 'completed',
     'failed': 'failed',

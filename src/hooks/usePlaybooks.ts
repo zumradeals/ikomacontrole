@@ -128,28 +128,8 @@ async function fetchPlaybooks(): Promise<PlaybookItem[]> {
     throw new Error(data.error);
   }
 
-  // Parse response - handle multiple formats:
-  // 1. { items: [...] } - standard format
-  // 2. { "0": {...}, "1": {...}, proxy_* } - indexed object format
-  // 3. [...] - direct array format
-  let rawPlaybooks: RawPlaybook[] = [];
-
-  if (Array.isArray(data?.items)) {
-    // Standard format with items array
-    rawPlaybooks = data.items;
-  } else if (Array.isArray(data)) {
-    // Direct array format
-    rawPlaybooks = data;
-  } else if (data && typeof data === 'object') {
-    // Indexed object format { "0": {...}, "1": {...}, proxy_* }
-    // Filter out proxy metadata keys
-    const entries = Object.entries(data).filter(([key]) => 
-      !key.startsWith('proxy_') && !isNaN(Number(key))
-    );
-    rawPlaybooks = entries.map(([, value]) => value as RawPlaybook);
-  }
-
-  const items = rawPlaybooks.map(normalizePlaybook);
+  // admin-proxy now guarantees { items: [...] } format with contractual fields
+  const items: PlaybookItem[] = data?.items || [];
   console.info(`[usePlaybooks] Loaded ${items.length} playbooks from API`);
   
   return items;

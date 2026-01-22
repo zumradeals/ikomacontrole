@@ -51,6 +51,12 @@ const statusConfig: Record<OrderStatus, {
     color: 'text-amber-400',
     bgColor: 'bg-amber-500/10',
   },
+  claimed: {
+    icon: <Zap className="w-4 h-4" />,
+    label: 'Réclamé',
+    color: 'text-purple-400',
+    bgColor: 'bg-purple-500/10',
+  },
   running: {
     icon: <Loader2 className="w-4 h-4 animate-spin" />,
     label: 'En cours',

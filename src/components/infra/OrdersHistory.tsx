@@ -66,6 +66,11 @@ const statusConfig: Record<OrderStatus, { icon: React.ReactNode; label: string; 
     label: 'En attente',
     class: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
   },
+  claimed: {
+    icon: <Terminal className="w-4 h-4" />,
+    label: 'Réclamé',
+    class: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+  },
   running: {
     icon: (
       <span className="relative flex h-4 w-4 items-center justify-center">
