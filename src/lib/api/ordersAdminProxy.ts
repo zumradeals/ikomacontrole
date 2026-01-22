@@ -452,6 +452,9 @@ function mapApiStatus(apiStatus: string): LocalOrderStatus {
 }
 
 function mapOrder(raw: any): ExternalOrder {
+  // Map report/reportContract - API may use either name
+  const rawReport = raw.reportContract ?? raw.report_contract ?? raw.report;
+  
   return {
     id: raw.id,
     serverId: raw.server_id ?? raw.serverId,
@@ -465,7 +468,29 @@ function mapOrder(raw: any): ExternalOrder {
     stdoutTail: raw.stdout_tail ?? raw.stdoutTail,
     stderrTail: raw.stderr_tail ?? raw.stderrTail,
     result: raw.result,
-    reportContract: raw.reportContract ?? raw.report_contract,
+    reportContract: rawReport ? {
+      version: rawReport.version ?? 'v1',
+      compatibleVersions: rawReport.compatibleVersions,
+      summary: rawReport.summary,
+      durationMs: rawReport.durationMs ?? (
+        rawReport.startedAt && rawReport.finishedAt
+          ? new Date(rawReport.finishedAt).getTime() - new Date(rawReport.startedAt).getTime()
+          : undefined
+      ),
+      steps: rawReport.steps?.map((s: any) => ({
+        key: s.key ?? s.name ?? 'unknown',
+        title: s.title ?? s.name ?? s.key ?? 'Step',
+        status: s.status ?? (s.ok === true ? 'SUCCESS' : s.ok === false ? 'FAILED' : 'PENDING'),
+        startedAt: s.startedAt ?? s.started_at,
+        endedAt: s.endedAt ?? s.ended_at ?? s.finishedAt,
+        output: s.output ?? s.stdout,
+        error: s.error ?? s.stderr,
+      })),
+      errors: rawReport.errors?.map((e: any) => ({
+        code: e.code ?? 'UNKNOWN',
+        message: e.message ?? String(e),
+      })),
+    } : undefined,
     createdAt: raw.created_at ?? raw.createdAt ?? new Date().toISOString(),
     startedAt: raw.started_at ?? raw.startedAt,
     completedAt: raw.completed_at ?? raw.completedAt,
