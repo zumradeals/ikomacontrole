@@ -137,10 +137,18 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
           </div>
         </div>
 
-        {/* Progress indicator for running - only show if backend provides it */}
-        {order.status === 'running' && progress !== null && (
-          <div className="w-16 text-right">
-            <span className="text-xs font-mono text-blue-400">{progress}%</span>
+        {/* Progress indicator for running */}
+        {order.status === 'running' && (
+          <div className="w-16 text-right flex items-center justify-end gap-1.5">
+            {progress !== null ? (
+              <span className="text-xs font-mono text-blue-400">{progress}%</span>
+            ) : (
+              /* Pulsing dot for indeterminate progress */
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+              </span>
+            )}
           </div>
         )}
 
@@ -155,6 +163,15 @@ function ExecutionItem({ order, isExpanded, onToggle }: {
       {order.status === 'running' && progress !== null && (
         <div className="px-3 pb-2">
           <Progress value={progress} className="h-1.5" />
+        </div>
+      )}
+      
+      {/* Indeterminate progress indicator when no progress value */}
+      {order.status === 'running' && progress === null && (
+        <div className="px-3 pb-2">
+          <div className="h-1.5 w-full bg-blue-500/20 rounded-full overflow-hidden">
+            <div className="h-full w-1/3 bg-blue-500 rounded-full animate-[indeterminate_1.5s_ease-in-out_infinite]" />
+          </div>
         </div>
       )}
 
