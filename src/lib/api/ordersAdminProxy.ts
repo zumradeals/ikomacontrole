@@ -446,16 +446,20 @@ export interface ExternalOrder {
 /**
  * Map API status (QUEUED, CLAIMED, RUNNING, SUCCEEDED, FAILED, CANCELLED)
  * to local status (pending, claimed, running, completed, failed, cancelled)
+ * 
+ * IMPORTANT: All status mappings are EXPLICIT. Unknown statuses throw an error
+ * instead of silently falling back to 'pending'.
  */
 function mapApiStatus(apiStatus: string): LocalOrderStatus {
   const statusMap: Record<string, LocalOrderStatus> = {
+    // API uppercase statuses
     'QUEUED': 'pending',
     'CLAIMED': 'claimed',
     'RUNNING': 'running',
     'SUCCEEDED': 'completed',
     'FAILED': 'failed',
     'CANCELLED': 'cancelled',
-    // Also handle lowercase variants for backwards compatibility
+    // Lowercase variants for local/legacy compatibility
     'pending': 'pending',
     'claimed': 'claimed',
     'running': 'running',
@@ -463,7 +467,15 @@ function mapApiStatus(apiStatus: string): LocalOrderStatus {
     'failed': 'failed',
     'cancelled': 'cancelled',
   };
-  return statusMap[apiStatus] ?? 'pending';
+  
+  const mapped = statusMap[apiStatus];
+  
+  if (mapped === undefined) {
+    console.warn(`[mapApiStatus] Unknown status: "${apiStatus}" - defaulting to 'pending'. This should be investigated.`);
+    return 'pending';
+  }
+  
+  return mapped;
 }
 
 function mapOrder(raw: any): ExternalOrder {
