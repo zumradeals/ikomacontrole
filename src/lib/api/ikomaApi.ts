@@ -74,17 +74,9 @@ export interface ApiResult<T> {
 }
 
 // ============================================
-// Playbooks - DEPRECATED: Use usePlaybooks hook instead
-// Cette liste statique est conservée uniquement pour fallback
-// La source de vérité est GET /v1/admin/playbooks
+// Playbooks - REMOVED: Use usePlaybooks hook
+// The source of truth is GET /v1/playbooks
 // ============================================
-
-/** @deprecated Use usePlaybooks hook - this is kept only as fallback */
-export const STATIC_PLAYBOOKS = [
-  { key: 'SYSTEM.diagnostics', name: 'System Diagnostics', description: 'Run comprehensive system diagnostics' },
-  { key: 'SYSTEM.heartbeat', name: 'Heartbeat Check', description: 'Quick connectivity test' },
-  { key: 'system.test_ping', name: 'Test de connectivité', description: 'Simple ping test' },
-];
 
 // ============================================
 // Error Handling
