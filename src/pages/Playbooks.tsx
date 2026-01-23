@@ -238,14 +238,47 @@ const Playbooks = () => {
   const [enabledPlaybooks, setEnabledPlaybooks] = useState<Set<string>>(new Set());
 
   // Fetch playbooks from API
-  const { data: allPlaybooks, isLoading: isLoadingPlaybooks, error: playbooksError, refetch: refetchPlaybooks, isFetching: isRefetchingPlaybooks } = usePlaybooks();
+  const { data: apiPlaybooks, isLoading: isLoadingApiPlaybooks, error: playbooksError, refetch: refetchPlaybooks, isFetching: isRefetchingPlaybooks } = usePlaybooks();
 
   // Fetch local playbooks from Supabase
-  const { data: localPlaybooks = [] } = useLocalPlaybooksList();
+  const { data: localPlaybooks = [], isLoading: isLoadingLocalPlaybooks, refetch: refetchLocalPlaybooks } = useLocalPlaybooksList();
+
+  // Merge API playbooks with local published playbooks
+  const allPlaybooks = useMemo(() => {
+    const merged: PlaybookItem[] = [...(apiPlaybooks || [])];
+    
+    // Add local playbooks that are published (approved)
+    const publishedLocal = localPlaybooks.filter(lp => lp.status === 'published');
+    for (const local of publishedLocal) {
+      // Don't add if already exists from API (same key)
+      if (!merged.some(p => p.key === local.key)) {
+        const localSchema = local.schema as Record<string, unknown> | undefined;
+        merged.push({
+          key: local.key,
+          version: String(local.current_version || 1),
+          title: local.title,
+          description: local.description || '',
+          visibility: (local.visibility as 'internal' | 'public') || 'public',
+          actions: ['run'],
+          schema: {
+            type: 'object' as const,
+            properties: (localSchema?.properties as PlaybookItem['schema']['properties']) || {},
+            required: (localSchema?.required as string[]) || [],
+          },
+          category: local.category || 'custom',
+          riskLevel: local.risk_level || 'medium',
+        });
+      }
+    }
+    
+    return merged;
+  }, [apiPlaybooks, localPlaybooks]);
+
+  const isLoadingPlaybooks = isLoadingApiPlaybooks || isLoadingLocalPlaybooks;
 
   // Initialize enabled playbooks when data loads
   useMemo(() => {
-    if (allPlaybooks && enabledPlaybooks.size === 0) {
+    if (allPlaybooks && allPlaybooks.length > 0 && enabledPlaybooks.size === 0) {
       setEnabledPlaybooks(new Set(allPlaybooks.map(p => p.key)));
     }
   }, [allPlaybooks, enabledPlaybooks.size]);
@@ -477,7 +510,10 @@ const Playbooks = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => refetchPlaybooks()}
+            onClick={() => {
+              refetchPlaybooks();
+              refetchLocalPlaybooks();
+            }}
             disabled={isRefetchingPlaybooks}
             className="gap-2"
           >

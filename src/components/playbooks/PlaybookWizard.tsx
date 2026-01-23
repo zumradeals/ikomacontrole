@@ -388,22 +388,37 @@ export function PlaybookWizard({ open, onOpenChange }: PlaybookWizardProps) {
 
                 {/* Script Scan Section */}
                 <div className="space-y-3">
-                  <h4 className="text-sm font-medium flex items-center gap-2">
-                    <FolderSearch className="w-4 h-4 text-primary" />
-                    Scanner les scripts serveur
-                  </h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium flex items-center gap-2">
+                      <FolderSearch className="w-4 h-4 text-primary" />
+                      Scanner les scripts serveur
+                    </h4>
+                    <Badge variant="outline" className="text-xs text-muted-foreground">
+                      Optionnel
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Sélectionnez un serveur uniquement si vous souhaitez importer un script existant. 
+                    Sinon, utilisez un template ci-dessus.
+                  </p>
                   
                   <div className="flex gap-2">
                     <Select value={scanInfraId} onValueChange={setScanInfraId}>
                       <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="Sélectionner un serveur..." />
+                        <SelectValue placeholder="Sélectionner un serveur (optionnel)..." />
                       </SelectTrigger>
                       <SelectContent>
-                        {infrastructures.map(infra => (
-                          <SelectItem key={infra.id} value={infra.id}>
-                            {infra.name}
-                          </SelectItem>
-                        ))}
+                        {infrastructures.length === 0 ? (
+                          <div className="p-2 text-sm text-muted-foreground text-center">
+                            Aucun serveur disponible
+                          </div>
+                        ) : (
+                          infrastructures.map(infra => (
+                            <SelectItem key={infra.id} value={infra.id}>
+                              {infra.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     <Button 
